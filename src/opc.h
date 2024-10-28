@@ -1,0 +1,16 @@
+typedef enum {
+    ADD_M8_R8   = 0x00,
+    ADD_M16_R16 = 0x01,
+    ADD_R8_R8   = 0x02,
+    ADD_R16_R16 = 0x03,
+    ADD_AL_IMM  = 0x04,
+    ADD_AX_IMM  = 0x05,
+    PUSH_ES     = 0x06,
+    POP_ES      = 0x07,
+    OR_M8_R8    = 0x08,
+    OR_M16_R16  = 0x09,
+    OR_R8_R8    = 0x0A,
+    OR_AL_IMM   = 0x0C,
+    OR_AX_IMM   = 0x0D,
+    PUSH_CS     = 0x0E,
+} x86_opc_t;
