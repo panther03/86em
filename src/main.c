@@ -21,10 +21,11 @@ int main(int argc, char **argv) {
     }
 
     size_t prog_size = init_mem(prog, offset);
+    printf("program size %d \n", prog_size);
     
     sim_state_t* state = sim_init();
 
-    sim_run(state);
+    sim_run(state, prog_size);
 
     fclose(prog);
     return 0;

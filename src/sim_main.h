@@ -2,6 +2,7 @@
 #define SIM_MAIN_H
 
 #include <stdint.h>
+#include "sim_mem.h"
 
 typedef union {
     uint16_t x;
@@ -57,6 +58,14 @@ typedef struct {
 
 sim_state_t* sim_init();
 
-void sim_run(sim_state_t* state);
+void sim_run(sim_state_t* state, size_t prog_size);
+
+#define SEGMENT(base,offset) ((base << 4) + offset)
+#define LOAD_IP_BYTE (load_u8(SEGMENT(state->cs, (state->ip++))))
+static inline uint16_t LOAD_IP_WORD(sim_state_t* state) {
+    uint16_t val = load_u16(SEGMENT(state->cs, (state->ip)));
+    state->ip += 2;
+    return val;
+}
 
 #endif // SIM_MAIN_H

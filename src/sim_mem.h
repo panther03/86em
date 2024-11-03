@@ -21,4 +21,9 @@ static inline uint32_t load_u32(int addr) {
     return (mem[addr+3] << 24) + (mem[addr+2] << 16) + (mem[addr+1] << 8) + (mem[addr]);
 }
 
+static inline void store_u16(int addr, uint16_t val) {
+    mem[addr] = val & 0xFF;
+    mem[addr+1] = val >> 8;
+}
+
 #endif // MEMORY_H

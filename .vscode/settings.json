@@ -1,5 +1,9 @@
 {
     "clangd.arguments": [
         "-I ${workspaceDirectory}/include"
-    ]
+    ],
+    "files.associations": {
+        "sim_main.h": "c",
+        "sim_mem.h": "c"
+    }
 }

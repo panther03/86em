@@ -93,13 +93,30 @@ uint8_t read_reg_u8(sim_state_t *state, uint8_t reg) {
     }
 }
 
+uint32_t get_16b_mem_base(sim_state_t *state, uint8_t rm) {
+    uint32_t base = (rm & 0b1) ? state->di : state->si;
+    switch (rm & 0b110) {
+        case 0b000: return base + state->b.x;
+        case 0b010: return base + state->bp;
+        case 0b100: return base;
+        // 0b110
+        default: return (rm & 0b1) ? state->b.x : LOAD_IP_WORD(state);
+    }
+}
+
 uint32_t read_mod_rm(sim_state_t *state, uint8_t mod, uint8_t rm, uint8_t is_16) {
     uint32_t reg = is_16 ? read_reg_u16(state, mod) : read_reg_u8(state, mod);
     if (mod == 0b11) {
         // register only
         return reg;
     } else {
-        printf("not handled \n"); exit(1);
+        uint32_t base = get_16b_mem_base(state, rm);
+        if (mod == 0b01) {
+            base += LOAD_IP_BYTE;
+        } else if (mod == 0b10) {
+            base += LOAD_IP_WORD(state);
+        }
+        return load_u16(base);
     }
 }
 
@@ -112,12 +129,17 @@ void write_mod_rm(sim_state_t *state, uint8_t mod, uint8_t rm, uint32_t val, uin
             write_reg_u8(state, rm, (uint8_t)val);
         }
     } else {
-        uint32_t reg = is_16 ? read_reg_u16(state, rm) : read_reg_u8(state, rm);
-        printf("not handled \n"); exit(1);
+        uint32_t base = get_16b_mem_base(state, rm);
+        if (mod == 0b01) {
+            base += LOAD_IP_BYTE;
+        } else if (mod == 0b10) {
+            base += LOAD_IP_WORD(state);
+        }
+        store_u16(base, val);
     }
 }
 
-inline uint32_t parity(uint32_t op) {
+static inline uint32_t parity(uint32_t op) {
     op ^= op >> 16;
     op ^= op >> 8;
     op ^= op >> 4;
@@ -180,37 +202,67 @@ uint32_t x86_and(sim_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) 
     return res;
 }
 
-
-void update_flags(sim_state_t *state) {
-    // stub
-    return;
+uint32_t x86_xor(sim_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) {
+    uint32_t op_size = (is_16 ? 16 : 8);
+    uint32_t res = (op1 ^ op2) & ((1 << op_size)-1);
+    state->flags.c_f = 0;
+    state->flags.o_f = 0;
+    state->flags.a_f = 0;
+    state->flags.p_f = parity(res);
+    state->flags.s_f = (res >> (op_size-1));
+    state->flags.z_f = res == 0;
+    return res;
 }
 
 uint8_t insn_mode(uint8_t opc) {
-    // arithmetic type instruction
     if (((opc & 0x4) == 0) && ((opc & 0xF0) <= 0x30 || (opc & 0xFC) == 0x88)) {
+        // arithmetic type instruction
         return 1;
+    } else if ((opc & 0xC6) == 0x04) {
+        // AX/AL immediate instruction 
+        return 2;
+    } else if ((opc & 0xF8) == 0x40) {
+        // Inc
+        return 3;
+    }  else if ((opc & 0xF8) == 0x48) {
+        // Dec
+        return 4;
+    } else if ((opc & 0xF8) == 0x50) {
+        // Push
+        return 5;
+    } else if ((opc & 0xF8) == 0x58) {
+        // Pop
+        return 6;
+    } else if ((opc & 0xF8) == 0x98) {
+        // XCHG
+        return 7;
+    } else if ((opc & 0xF8) == 0xB8) {
+        // MOV (16-bit)
+        return 8;
+    } else if ((opc & 0xF8) == 0xB0) {
+        // MOV (8-bit)
+        return 9;
     }
+
     return 0;
 }
 
-#define SEGMENT(base,offset) ((base << 4) + offset)
-#define LOAD_IP (load_u8(SEGMENT(state->cs, (state->ip++))))
 
-void sim_run(sim_state_t* state) {
-    while (1) {
-        uint8_t opc = LOAD_IP;
+void sim_run(sim_state_t* state, size_t prog_size) {
+    int prog_end = SEGMENT(state->cs, state->ip) + prog_size;
+    while (SEGMENT(state->cs,state->ip) < prog_end) {
+        uint8_t opc = LOAD_IP_BYTE;
         //if (opc == 0xF) {
         //    opc = (opc << 8) + LOAD_IP;
         //}
 
         dump_state(state);
 
-        printf("opc: %d\n", opc);
         uint8_t mode = insn_mode(opc);
 
-        if (insn_mode(opc)) {
-            mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t) LOAD_IP;
+        switch (insn_mode(opc)) {
+        case 1: {
+            mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t) LOAD_IP_BYTE;
             uint8_t s = opc & 0x1;
             uint8_t d = opc & 0x2;
 
@@ -225,7 +277,6 @@ void sim_run(sim_state_t* state) {
                 op1 = op2;
                 op2 = temp;
             }
-            printf("%d %d %d \n", mod_reg_rm.fields.mod, mod_reg_rm.fields.reg,mod_reg_rm.fields.rm);
 
             state->last_op.op1 = op1;
 
@@ -237,29 +288,28 @@ void sim_run(sim_state_t* state) {
                     break;
                 }
                 case 0x18: {
-                    update_flags(state);
-                    op1 -= op2 - state->flags.c_f;
+                    op1 = x86_sub(state, op1, op2, state->flags.c_f, s);
                     break;
                 }
                 case 0x20: {
-                    op1 &= op2;
+                    op1 = x86_and(state, op1, op2, s);
                     break;
                 }
                 case 0x28: {
-                    op1 -= op2;
+                    op1 = x86_sub(state, op1, op2, 0, s);
                     break;
                 }
                 case 0x30: {
-                    op1 ^= op2;
+                    op1 = x86_xor(state, op1, op2, s);
                     break;
                 }
                 case 0x38: {
-                    // TODO
-                    op1 -= op2;
+                    x86_sub(state, op1, op2, 0, s);
                     break;
                 }
                 case 0x80: {
                     op1 = op2;
+                    break;
                 }
                 default: {
                     printf("unrecognized arithmetic opcode %d", opc);
@@ -281,23 +331,112 @@ void sim_run(sim_state_t* state) {
                     write_reg_u8(state, mod_reg_rm.fields.reg, op1);
                 }
             }
-        } else {
-            switch (opc) {
-                case 0x5: {
-                    uint16_t imm = load_u16(SEGMENT(state->cs, state->ip));
-                    state->ip += 2;
-                    state->last_op.op1 = state->a.x;
-                    state->a.x += imm;
-                    state->last_op.res = state->a.x;
-                    state->last_op.op2 = imm;
-                    state->last_op.opc = opc;
+            break;
+        }
+        case 2: {
+            uint8_t s = opc & 0x1;
+            uint32_t imm = 0;
+            uint32_t op1 = 0;
+            if (s) {
+                imm = LOAD_IP_WORD(state);
+                op1 = state->a.x;
+            } else {
+                imm = LOAD_IP_BYTE;
+                op1 = state->a.b.l;
+            }
+            switch (opc & 0x38) {
+                case 0x0: {
+                    op1 = x86_add(state, op1, imm, 0, s);
                     break;
                 }
-                default: {
-                    printf("panic\n");
-                    exit(1);
+                case 0x8: {
+                    op1 = x86_or(state, op1, imm, s);
+                    break;
+                }
+                case 0x10: {
+                    op1 = x86_add(state, op1, imm, state->flags.c_f, s);
+                    break;
+                }
+                case 0x18: {
+                    op1 = x86_sub(state, op1, imm, state->flags.c_f, s);
+                    break;
+                }
+                case 0x20: {
+                    op1 = x86_and(state, op1, imm, s);
+                    break;
+                }
+                case 0x28: {
+                    op1 = x86_sub(state, op1, imm, state->flags.c_f, s);
+                    break;
+                }
+                case 0x30: {
+                    op1 = x86_xor(state, op1, imm, s);
+                    break;
+                }
+                case 0x38: {
+                    x86_sub(state, op1, imm, 0, s);
+                    break;
                 }
             }
+
+            if (s) {
+                state->a.x = op1;
+            } else {
+                state->a.b.l = op1;
+            }
+            break;
+        }
+        case 3: {
+            uint8_t reg = opc & 0x7;
+            uint32_t res = read_reg_u16(state, reg) + 1;
+            write_reg_u16(state, reg, res);
+            break;
+        }
+        case 4: {
+            uint8_t reg = opc & 0x7;
+            uint32_t res = read_reg_u16(state, reg) - 1;
+            write_reg_u16(state, reg, res);
+            break;
+        }
+        case 5: {
+            uint8_t reg = opc & 0x7;
+            uint32_t res = read_reg_u16(state, reg);
+            state->sp -= 2;
+            store_u16(SEGMENT(state->ss, state->sp), res);
+            break;
+        }
+        case 6: {
+            uint8_t reg = opc & 0x7;
+            uint32_t res = load_u16(SEGMENT(state->ss, state->sp));
+            write_reg_u16(state, reg, res);
+            state->sp += 2;
+            break;
+        }
+        case 7: {
+            uint8_t reg = opc & 0x7;
+            uint32_t op1 = read_reg_u16(state, reg);
+            write_reg_u16(state, reg, state->a.x);
+            state->a.x = op1;
+            break;
+        }
+        case 8: {
+            uint8_t reg = opc & 0x7;
+            uint32_t imm = LOAD_IP_WORD(state);
+            write_reg_u16(state, reg, imm);
+            break;
+        }
+        case 9: {
+            uint8_t reg = opc & 0x7;
+            uint32_t imm = load_u8(SEGMENT(state->cs, state->ip));
+            state->ip += 1;
+            write_reg_u8(state, reg, imm);
+            break;
+        }
+        default: {
+            printf("panic\n");
+            exit(1);
+        }
         }
     }
+    dump_state(state);
 }
