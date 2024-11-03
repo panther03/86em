@@ -4,6 +4,7 @@
 
 #include "vm.h"
 #include "vm_mem.h"
+#include "vm_io.h"
 
 #include "opc.h"
 
@@ -430,14 +431,27 @@ void vm_run(vm_state_t* state, int max_cycles) {
         }
         case 9: {
             uint8_t reg = opc & 0x7;
-            uint32_t imm = load_u8(SEGMENT(state->cs, state->ip));
-            state->ip += 1;
+            uint32_t imm = LOAD_IP_BYTE;
             write_reg_u8(state, reg, imm);
             break;
         }
         default: {
-            printf("panic\n");
-            exit(1);
+            switch (opc) {
+                case 0xE6: {
+                    uint32_t imm = LOAD_IP_BYTE;
+                    io_write_u16(imm, state->a.b.l);
+                    break;
+                }
+                case 0xE7: {
+                    uint32_t imm = LOAD_IP_BYTE;
+                    io_write_u16(imm, state->a.x);
+                    break;
+                }
+                default: {
+                    printf("unrecognized opcode: %d\n", opc);
+                    exit(1);
+                }    
+            }
         }
         }
     }

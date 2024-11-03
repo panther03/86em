@@ -18,7 +18,7 @@ void init_mem(FILE *prog, int offset) {
 
     size_t prog_size = 0;
     while (fread(imem, 1, 1, prog) && imem < (mem+MEM_SIZE)) {
-        printf("%02x ", *imem);
+        //printf("%02x ", *imem);
         prog_size++;
         imem++;
     }

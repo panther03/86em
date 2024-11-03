@@ -7,8 +7,8 @@
 typedef union {
     uint16_t x;
     struct {
-        uint8_t h;
         uint8_t l;
+        uint8_t h;
     } __attribute__((packed)) b;
 } x86_reg_t;
 
