@@ -5,6 +5,15 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "type": "gdb",
+            "request": "launch",
+            "name": "Launch Program",
+            "target": "./build/86em",
+            "cwd": "${workspaceRoot}",
+            "valuesFormatting": "parseText",
+            "arguments": "testprog.bin 1048560",
+        },
+        {
             "name": "Launch emulator",
             "type": "cppdbg",
             "request": "launch",

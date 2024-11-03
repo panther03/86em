@@ -1,17 +1,32 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include <unistd.h>
 
-#include "sim_mem.h"
-#include "sim_main.h"
+#include "vm_mem.h"
+#include "vm.h"
+#include "dbg.h"
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
+    int dbg = 0;
+    opterr = 0;
+    int c;
+
+    while ((c = getopt(argc, argv, "d")) != -1 ) {
+        switch (c) {
+            case 'd': dbg = 1; break;
+            default: 
+                abort();
+        }
+    }
+
+    if (argc - optind < 2) {
         printf("Expected path to bin file and offset.\n");
         return 1;
     }
     // Arguments: bin file, offset (segments pre-computed)
-    const char *path = argv[1];
-    const int offset = atoi(argv[2]);
+    const char *path = argv[optind];
+    const int offset = atoi(argv[optind + 1]);
     printf("%s\n", path);
 
     FILE* prog = fopen(path, "r");
@@ -20,14 +35,17 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    size_t prog_size = init_mem(prog, offset);
-    printf("program size %d \n", prog_size);
-    
-    sim_state_t* state = sim_init();
-
-    sim_run(state, prog_size);
-
+    init_mem(prog, offset);
     fclose(prog);
+    
+    vm_state_t* state = vm_init();
+
+    if (dbg) {
+        dbg_intf(state);
+    } else {
+        vm_run(state, -1);
+    }
+
     return 0;
 }
 

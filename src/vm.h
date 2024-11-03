@@ -1,8 +1,8 @@
-#ifndef SIM_MAIN_H
-#define SIM_MAIN_H
+#ifndef vm_MAIN_H
+#define vm_MAIN_H
 
 #include <stdint.h>
-#include "sim_mem.h"
+#include "vm_mem.h"
 
 typedef union {
     uint16_t x;
@@ -54,18 +54,19 @@ typedef struct {
     uint16_t ip;
     x86_flags_t flags;
     last_op_t last_op;
-} sim_state_t;
+    uint64_t cycles;
+} vm_state_t;
 
-sim_state_t* sim_init();
+vm_state_t* vm_init();
 
-void sim_run(sim_state_t* state, size_t prog_size);
+void vm_run(vm_state_t* state, int max_cycles);
 
 #define SEGMENT(base,offset) ((base << 4) + offset)
 #define LOAD_IP_BYTE (load_u8(SEGMENT(state->cs, (state->ip++))))
-static inline uint16_t LOAD_IP_WORD(sim_state_t* state) {
+static inline uint16_t LOAD_IP_WORD(vm_state_t* state) {
     uint16_t val = load_u16(SEGMENT(state->cs, (state->ip)));
     state->ip += 2;
     return val;
 }
 
-#endif // SIM_MAIN_H
+#endif // vm_MAIN_H

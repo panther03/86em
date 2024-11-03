@@ -1,12 +1,19 @@
-#ifndef MEMORY_H
-#define MEMORY_H
+#ifndef VM_MEM_H
+#define VM_MEM_H
 
 #include <stdio.h>
 #include <stdint.h>
 
-extern uint8_t* mem;
+typedef struct {
+    size_t prog_size;
+    size_t prog_start;
+} prog_info_t;
 
-size_t init_mem(FILE *prog, int offset);
+extern uint8_t* mem;
+extern prog_info_t prog_info;
+
+
+void init_mem(FILE *prog, int offset);
 
 // memory is little endian
 static inline uint8_t load_u8(int addr) {
@@ -26,4 +33,4 @@ static inline void store_u16(int addr, uint16_t val) {
     mem[addr+1] = val >> 8;
 }
 
-#endif // MEMORY_H
+#endif // VM_MEM_H

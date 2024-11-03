@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#include "sim_main.h"
-#include "sim_mem.h"
+#include "vm.h"
+#include "vm_mem.h"
 
 #include "opc.h"
 
@@ -16,17 +16,18 @@ typedef union {
     } __attribute__((packed)) fields;
 } mod_reg_rm_t;
 
-sim_state_t* sim_init() {
-    sim_state_t* state = (sim_state_t*)calloc(sizeof(sim_state_t), 0);
+vm_state_t* vm_init() {
+    vm_state_t* state = (vm_state_t*)calloc(sizeof(vm_state_t), 1);
     state->cs = 0xFFFF;
     state->flags.res0 = 1;
     state->flags.res1 = 1;
     state->flags.res2 = 1;
     state->flags.res3 = 0xF;
+    state->cycles = 0;
     return state;
 }
 
-void dump_state(sim_state_t* state) {
+void dump_state(vm_state_t* state) {
     printf("AX %d\n", state->a.x);
     printf("BX %d\n", state->b.x);
     printf("CX %d\n", state->c.x);
@@ -34,8 +35,8 @@ void dump_state(sim_state_t* state) {
 }
 
 // TODO: optimize these into writes/reads of offsets of the struct
-// if the fields are ordered the right way then you can simply extract the bits and use that as an offset
-void write_reg_u16(sim_state_t *state, uint8_t reg, uint16_t val) {
+// if the fields are ordered the right way then you can vmply extract the bits and use that as an offset
+void write_reg_u16(vm_state_t *state, uint8_t reg, uint16_t val) {
     assert(reg < 0b1000);
     switch(reg) {
         case 0b000: state->a.x = val; break;
@@ -49,7 +50,7 @@ void write_reg_u16(sim_state_t *state, uint8_t reg, uint16_t val) {
     }
 }
 
-void write_reg_u8(sim_state_t *state, uint8_t reg, uint8_t val) {
+void write_reg_u8(vm_state_t *state, uint8_t reg, uint8_t val) {
     assert(reg < 0b1000);
     switch(reg) {
         case 0b000: state->a.b.l = val; break;
@@ -63,7 +64,7 @@ void write_reg_u8(sim_state_t *state, uint8_t reg, uint8_t val) {
     }
 }
 
-uint16_t read_reg_u16(sim_state_t *state, uint8_t reg) {
+uint16_t read_reg_u16(vm_state_t *state, uint8_t reg) {
     assert(reg < 0b1000);
     switch(reg) {
         case 0b000: return state->a.x;
@@ -78,7 +79,7 @@ uint16_t read_reg_u16(sim_state_t *state, uint8_t reg) {
     }
 }
 
-uint8_t read_reg_u8(sim_state_t *state, uint8_t reg) {
+uint8_t read_reg_u8(vm_state_t *state, uint8_t reg) {
     assert(reg < 0b1000);
     switch(reg) {
         case 0b000: return state->a.b.l;
@@ -93,7 +94,7 @@ uint8_t read_reg_u8(sim_state_t *state, uint8_t reg) {
     }
 }
 
-uint32_t get_16b_mem_base(sim_state_t *state, uint8_t rm) {
+uint32_t get_16b_mem_base(vm_state_t *state, uint8_t rm) {
     uint32_t base = (rm & 0b1) ? state->di : state->si;
     switch (rm & 0b110) {
         case 0b000: return base + state->b.x;
@@ -104,7 +105,7 @@ uint32_t get_16b_mem_base(sim_state_t *state, uint8_t rm) {
     }
 }
 
-uint32_t read_mod_rm(sim_state_t *state, uint8_t mod, uint8_t rm, uint8_t is_16) {
+uint32_t read_mod_rm(vm_state_t *state, uint8_t mod, uint8_t rm, uint8_t is_16) {
     uint32_t reg = is_16 ? read_reg_u16(state, mod) : read_reg_u8(state, mod);
     if (mod == 0b11) {
         // register only
@@ -120,7 +121,7 @@ uint32_t read_mod_rm(sim_state_t *state, uint8_t mod, uint8_t rm, uint8_t is_16)
     }
 }
 
-void write_mod_rm(sim_state_t *state, uint8_t mod, uint8_t rm, uint32_t val, uint8_t is_16) {
+void write_mod_rm(vm_state_t *state, uint8_t mod, uint8_t rm, uint32_t val, uint8_t is_16) {
     if (mod == 0b11) {
         // register only
         if (is_16) {
@@ -148,7 +149,7 @@ static inline uint32_t parity(uint32_t op) {
     return (~op) & 1;
 }
 
-uint32_t x86_add(sim_state_t *state, uint32_t op1, uint32_t op2, uint32_t carry, uint8_t is_16) {
+uint32_t x86_add(vm_state_t *state, uint32_t op1, uint32_t op2, uint32_t carry, uint8_t is_16) {
     uint32_t res = op1 + op2 + carry;
     uint32_t op_size = is_16 ? 16 : 8;
     uint32_t top_bit = 1 << (op_size-1);
@@ -163,7 +164,7 @@ uint32_t x86_add(sim_state_t *state, uint32_t op1, uint32_t op2, uint32_t carry,
     return res;
 }
 
-uint32_t x86_sub(sim_state_t *state, uint32_t op1, uint32_t op2, uint32_t carry, uint8_t is_16) {
+uint32_t x86_sub(vm_state_t *state, uint32_t op1, uint32_t op2, uint32_t carry, uint8_t is_16) {
     uint32_t res = op1 - op2 - carry;
     uint32_t op_size = is_16 ? 16 : 8;
     uint32_t top_bit = 1 << (op_size-1);
@@ -178,7 +179,7 @@ uint32_t x86_sub(sim_state_t *state, uint32_t op1, uint32_t op2, uint32_t carry,
     return res;
 }
 
-uint32_t x86_or(sim_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) {
+uint32_t x86_or(vm_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) {
     uint32_t op_size = (is_16 ? 16 : 8);
     uint32_t res = (op1 | op2) & ((1 << op_size)-1);
     state->flags.c_f = 0;
@@ -190,7 +191,7 @@ uint32_t x86_or(sim_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) {
     return res;
 }
 
-uint32_t x86_and(sim_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) {
+uint32_t x86_and(vm_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) {
     uint32_t op_size = (is_16 ? 16 : 8);
     uint32_t res = (op1 & op2) & ((1 << op_size)-1);
     state->flags.c_f = 0;
@@ -202,7 +203,7 @@ uint32_t x86_and(sim_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) 
     return res;
 }
 
-uint32_t x86_xor(sim_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) {
+uint32_t x86_xor(vm_state_t *state, uint32_t op1, uint32_t op2, uint8_t is_16) {
     uint32_t op_size = (is_16 ? 16 : 8);
     uint32_t res = (op1 ^ op2) & ((1 << op_size)-1);
     state->flags.c_f = 0;
@@ -248,15 +249,17 @@ uint8_t insn_mode(uint8_t opc) {
 }
 
 
-void sim_run(sim_state_t* state, size_t prog_size) {
-    int prog_end = SEGMENT(state->cs, state->ip) + prog_size;
-    while (SEGMENT(state->cs,state->ip) < prog_end) {
+void vm_run(vm_state_t* state, int max_cycles) {
+    int prog_end = prog_info.prog_start + prog_info.prog_size;
+    int cyc_start = state->cycles;
+    while ((SEGMENT(state->cs,state->ip) < prog_end) && (max_cycles < 0 || ((state->cycles - cyc_start) < max_cycles))) {
         uint8_t opc = LOAD_IP_BYTE;
         //if (opc == 0xF) {
         //    opc = (opc << 8) + LOAD_IP;
         //}
 
         dump_state(state);
+        state->cycles++;
 
         uint8_t mode = insn_mode(opc);
 
@@ -438,5 +441,4 @@ void sim_run(sim_state_t* state, size_t prog_size) {
         }
         }
     }
-    dump_state(state);
 }
