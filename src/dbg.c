@@ -78,7 +78,6 @@ void dbg_intf(vm_state_t* state) {
         if (line == NULL) {
             break;
         }
-        printf("line: %s\n", line);
         arg_split_t it = { line, false };
 
         const char* cmd = arg_next(&it);

@@ -69,4 +69,17 @@ static inline uint16_t LOAD_IP_WORD(vm_state_t* state) {
     return val;
 }
 
+static inline void push_u16(vm_state_t *state, uint16_t val) {
+    state->sp -= 2;
+    store_u16(SEGMENT(state->ss, state->sp), val);
+}
+
+static inline uint16_t pop_u16(vm_state_t *state) {
+    uint32_t res = load_u16(SEGMENT(state->ss, state->sp));
+    state->sp += 2;
+    return res;
+}
+
+#define SEXT_8_16(x) ((((int16_t)x)<<8)>>8)
+
 #endif // vm_MAIN_H

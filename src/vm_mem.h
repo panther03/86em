@@ -33,4 +33,8 @@ static inline void store_u16(int addr, uint16_t val) {
     mem[addr+1] = val >> 8;
 }
 
+static inline void store_u8(int addr, uint8_t val) {
+    mem[addr] = val;
+}
+
 #endif // VM_MEM_H
