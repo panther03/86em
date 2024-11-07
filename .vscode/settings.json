@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "vm_main.h": "c",
-        "vm_mem.h": "c"
+        "vm_mem.h": "c",
+        "stdlib.h": "c",
+        "util.h": "c"
     }
 }

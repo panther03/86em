@@ -13,6 +13,7 @@ extern uint8_t* mem;
 extern prog_info_t prog_info;
 
 
+void init_mem_blank();
 void init_mem(FILE *prog, int offset);
 
 // memory is little endian
