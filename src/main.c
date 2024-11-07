@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <unistd.h>
 
 #include "vm_mem.h"
 #include "vm.h"
 #include "dbg.h"
+#include "util.h"
 
 int main(int argc, char **argv) {
     int dbg = 0;
@@ -26,7 +26,11 @@ int main(int argc, char **argv) {
     }
     // Arguments: bin file, offset (segments pre-computed)
     const char *path = argv[optind];
-    const int offset = atoi(argv[optind + 1]);
+    const int offset = parse_offset_segment(argv[optind + 1]);
+    if (offset < 0) {
+        printf("Expected segment of the form abcd:1234 (not 0)\n");
+        exit(1);
+    }
     printf("%s\n", path);
 
     FILE* prog = fopen(path, "r");

@@ -7,6 +7,7 @@
 #include <readline/readline.h>
 #include <string.h>
 
+#include "util.h"
 #include "vm.h"
 
 /* A static variable for holding the line. */
@@ -94,6 +95,21 @@ void dbg_intf(vm_state_t* state) {
           vm_run(state, cyc_d);
         } else if (strcmp(cmd, "step") == 0 || strcmp(cmd, "s") == 0) {
           vm_run(state, 1);
+        } else if (strcmp(cmd, "bkpt") == 0 || strcmp(cmd, "b") == 0) {
+          char *bkpt = arg_next(&it);
+
+          char *bkpt_tmp = bkpt;
+          int32_t bkpt_d = parse_offset_segment(bkpt_tmp);
+          if (bkpt_d < 0) {
+            bkpt_d = strtol(bkpt, NULL, 16);
+            if (bkpt_d == 0) {
+              printf("Expected breakpoint argument, either segment or IP in hex");
+              continue;
+            }
+            bkpt_d = SEGMENT(state->cs, bkpt_d);
+          }
+          state->bkpt = bkpt_d;
+          state->bkpt_clear = false;
         } else {
           printf("unknown command: %s\n", cmd);
         }

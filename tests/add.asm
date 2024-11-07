@@ -5,7 +5,14 @@ add    ax, 1024
 jc fail
 add    cx, ax
 
-mov al, 0 
+
+mov ax, 0 
+add ax, ax
+pass:
+inc ax
+cmp ax, 10
+jge pass
+
 out 0xFF, al
 
 fail:

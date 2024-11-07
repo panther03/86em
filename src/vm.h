@@ -2,7 +2,9 @@
 #define vm_MAIN_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "vm_mem.h"
+#include "util.h"
 
 typedef union {
     uint16_t x;
@@ -36,6 +38,8 @@ typedef struct {
     uint8_t is_16;
 } last_op_t;
 
+// TODO separate out into CPU and VM structs, 
+// but dont want to add another indirection so idk
 typedef struct {
     x86_reg_t a;
     x86_reg_t b;
@@ -53,7 +57,8 @@ typedef struct {
     uint16_t ss;
     uint16_t ip;
     x86_flags_t flags;
-    last_op_t last_op;
+    int32_t bkpt;
+    bool bkpt_clear;
     uint64_t cycles;
 } vm_state_t;
 
@@ -61,7 +66,6 @@ vm_state_t* vm_init();
 
 void vm_run(vm_state_t* state, int max_cycles);
 
-#define SEGMENT(base,offset) ((base << 4) + offset)
 #define LOAD_IP_BYTE (load_u8(SEGMENT(state->cs, (state->ip++))))
 static inline uint16_t LOAD_IP_WORD(vm_state_t* state) {
     uint16_t val = load_u16(SEGMENT(state->cs, (state->ip)));
@@ -79,7 +83,5 @@ static inline uint16_t pop_u16(vm_state_t *state) {
     state->sp += 2;
     return res;
 }
-
-#define SEXT_8_16(x) ((((int16_t)x)<<8)>>8)
 
 #endif // vm_MAIN_H

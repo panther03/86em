@@ -1,13 +1,17 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <math.h>
+#include <string.h>
+#include <stdbool.h>
 
+#include "util.h"
 #include "vm.h"
 #include "vm_mem.h"
 #include "vm_io.h"
 
 #include "opc.h"
+
+#include "cfg.h"
 
 typedef union {
     uint8_t byte;
@@ -24,24 +28,70 @@ typedef union {
 } flags_union;
 
 vm_state_t* vm_init() {
-    vm_state_t* state = (vm_state_t*)calloc(sizeof(vm_state_t), 1);
+    vm_state_t* state = (vm_state_t*)calloc(1, sizeof(vm_state_t));
     state->cs = 0xFFFF;
     state->flags.res0 = 1;
     state->flags.res1 = 0;
     state->flags.res2 = 0;
     state->flags.res3 = 0xF;
     state->cycles = 0;
+    state->bkpt = -1;
+    state->bkpt_clear = true;
     return state;
 }
 
-void dump_state(vm_state_t* state) {
-    printf("IP %04x\n", state->ip);
-    printf("AX %04x\n", state->a.x);
-    printf("BX %04x\n", state->b.x);
-    printf("CX %04x\n", state->c.x);
-    printf("DX %04x\n", state->d.x);
-    printf("Flags %04x\n", state->flags);
-    printf("=============\n");
+#ifdef CFG_DIFF_TRACE
+#define HIGHLIGHT(a,b) if (a!=b) {printf("\e[0;31m");}
+#define HIGHLIGHT_END printf("\e[0m");
+#else 
+#define HIGHLIGHT(a,b)
+#define HIGHLIGHT_END
+#endif
+
+void dump_flags(uint16_t flags, uint16_t old_flags) {
+    const char flags_symbols[] = {'C', ' ', 'P', ' ', 'A', ' ', 'Z', 'S', 'T', 'I', 'D', 'O', '\0'};
+    printf("%s\n", flags_symbols);
+    for (int i = 0; i < 12; i++, flags >>= 1, old_flags >>= 1) {
+        int lsb_n = flags & 1;
+#ifdef CFG_DIFF_TRACE
+        int lsb_o = old_flags & 1;
+        if (lsb_n != lsb_o) { printf("\e[0;31m"); }
+        putc(lsb_n ? 'X' : '-', stdout);
+        if (lsb_n != lsb_o) { printf("\e[0m"); }
+#else
+        putc(lsb_n ? 'X' : ' ', stdout);
+#endif
+    }
+    putc('\n', stdout);
+}
+
+void dump_state(vm_state_t* state, vm_state_t* old_state) {
+    printf("========================================\n");
+    printf("\e[0;36mIP %04x\e[0m\t", state->ip); HIGHLIGHT_END
+    HIGHLIGHT(state->a.x, old_state->a.x) printf("AX %04x\t", state->a.x); HIGHLIGHT_END
+    HIGHLIGHT(state->b.x, old_state->b.x) printf("BX %04x\t", state->b.x); HIGHLIGHT_END
+    HIGHLIGHT(state->c.x, old_state->c.x) printf("CX %04x\t", state->c.x); HIGHLIGHT_END
+    HIGHLIGHT(state->d.x, old_state->d.x) printf("DX %04x\n", state->d.x); HIGHLIGHT_END
+
+    HIGHLIGHT(state->cs, old_state->cs) printf("CS %04x\t", state->cs); HIGHLIGHT_END
+    HIGHLIGHT(state->si, old_state->si) printf("SI %04x\t", state->si); HIGHLIGHT_END
+    HIGHLIGHT(state->di, old_state->di) printf("DI %04x\t", state->di); HIGHLIGHT_END
+    HIGHLIGHT(state->bp, old_state->bp) printf("BP %04x\t", state->bp); HIGHLIGHT_END
+    HIGHLIGHT(state->sp, old_state->sp) printf("SP %04x\n", state->sp); HIGHLIGHT_END
+
+    HIGHLIGHT(state->fs, old_state->fs) printf("FS %04x\t", state->fs); HIGHLIGHT_END
+    HIGHLIGHT(state->ds, old_state->ds) printf("DS %04x\t", state->ds); HIGHLIGHT_END
+    HIGHLIGHT(state->gs, old_state->gs) printf("GS %04x\t", state->gs); HIGHLIGHT_END
+    HIGHLIGHT(state->ss, old_state->ss) printf("SS %04x\t", state->ss); HIGHLIGHT_END
+    HIGHLIGHT(state->es, old_state->es) printf("ES %04x\n", state->es); HIGHLIGHT_END
+    flags_union flags_u; flags_u.fl = state->flags;
+#ifdef CFG_DIFF_TRACE
+    flags_union old_flags_u; old_flags_u.fl = old_state->flags;
+    dump_flags(flags_u.num, old_flags_u.num);
+#else 
+    dump_flags(flags_u.num, flags_u.num);
+#endif
+    printf("========================================\n");
 }
 
 // TODO: optimize these into writes/reads of offsets of the struct
@@ -103,6 +153,26 @@ uint8_t read_reg_u8(vm_state_t *state, uint8_t reg) {
         default: return 0;
     }
 }
+
+uint16_t read_seg(vm_state_t *state, uint8_t sr) {
+    switch(sr) {
+        case 0b00: return state->es;
+        case 0b01: return state->cs;
+        case 0b10: return state->ss;
+        case 0b11: return state->ds;
+        default: return 0;
+    }
+}
+
+void write_seg(vm_state_t *state, uint8_t sr, uint16_t val) {
+    switch(sr) {
+        case 0b00: state->es = val; break;
+        case 0b01: state->cs = val; break;
+        case 0b10: state->ss = val; break;
+        case 0b11: state->ds = val; break;
+    }
+}
+
 
 uint32_t get_16b_mem_base(vm_state_t *state, uint8_t rm) {
     uint32_t base = (rm & 0b1) ? state->di : state->si;
@@ -258,10 +328,10 @@ uint32_t x86_rotate(vm_state_t *state, uint8_t op, uint32_t x, uint32_t shamt, u
             break;
         }
         case 0b000: {
-            while (rc_temp_shamt != 0) {
+            while (ro_temp_shamt != 0) {
                 uint8_t temp_cf = (x >> (op_size-1));
                 x = (x << 1) + state->flags.c_f;
-                rc_temp_shamt -= 1;
+                ro_temp_shamt -= 1;
             }
             state->flags.c_f = x & 1;
             if (shamt == 1) {
@@ -270,11 +340,11 @@ uint32_t x86_rotate(vm_state_t *state, uint8_t op, uint32_t x, uint32_t shamt, u
             break;
         }
         case 0b001: {
-            while (rc_temp_shamt != 0) {
+            while (ro_temp_shamt != 0) {
                 uint8_t temp_cf = x & 1;
                 // todo op_size correct here?
                 x = (x >> 1) + (state->flags.c_f << op_size);
-                rc_temp_shamt -= 1;
+                ro_temp_shamt -= 1;
             }
             state->flags.c_f = x >> (op_size-1);
             if (shamt == 1) {
@@ -380,13 +450,21 @@ uint8_t insn_mode(uint8_t opc) {
 void vm_run(vm_state_t* state, int max_cycles) {
     int prog_end = prog_info.prog_start + prog_info.prog_size;
     int cyc_start = state->cycles;
-    while ((SEGMENT(state->cs,state->ip) < prog_end) && (max_cycles < 0 || ((state->cycles - cyc_start) < max_cycles))) {
+#ifdef CFG_DIFF_TRACE
+    vm_state_t old_state = *state;
+#endif
+    int addr;
+    while (((addr = SEGMENT(state->cs,state->ip)) < prog_end)
+     && (max_cycles < 0 || ((state->cycles - cyc_start) < ((uint64_t)max_cycles)))) {
+        if (addr == state->bkpt && !state->bkpt_clear) {
+            printf("Breakpoint hit at %08x\n", addr);
+            state->bkpt_clear = true;
+            return;
+        }
+        if ((state->bkpt > 0) && state->bkpt_clear) {
+            state->bkpt_clear = false;
+        }
         uint8_t opc = LOAD_IP_BYTE;
-        //if (opc == 0xF) {
-        //    opc = (opc << 8) + LOAD_IP;
-        //}
-
-        dump_state(state);
         state->cycles++;
 
         uint8_t mode = insn_mode(opc);
@@ -409,8 +487,6 @@ void vm_run(vm_state_t* state, int max_cycles) {
                 op1 = op2;
                 op2 = temp;
             }
-
-            state->last_op.op1 = op1;
 
             switch (opc & 0xFC) {
                 case  0x0: op1 = x86_add(state, op1, op2, 0, s); break;
@@ -439,7 +515,7 @@ void vm_run(vm_state_t* state, int max_cycles) {
                     x86_sub(state, op1, op2, 0, s);
                     break;
                 }
-                case 0x80: {
+                case 0x88: {
                     op1 = op2;
                     break;
                 }
@@ -448,11 +524,6 @@ void vm_run(vm_state_t* state, int max_cycles) {
                     return;
                 }
             }
-
-            state->last_op.is_16 = s;
-            state->last_op.res = op1;
-            state->last_op.op2 = op2;
-            state->last_op.opc = opc;
 
             if (!d) {
                 write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, op1, s);
@@ -643,13 +714,23 @@ void vm_run(vm_state_t* state, int max_cycles) {
             } else {
                 op1 = x86_rotate(state, mod_reg_rm.fields.reg, op1, shamt, s);
             }
-            printf("Op1: %d\n", op1);
             write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, op1, s);
             break;
         }
         default: {
-            printf("Default\n");
             switch (opc) {
+                case 0x8C: {
+                    mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t) LOAD_IP_BYTE;
+                    uint16_t val = read_seg(state, mod_reg_rm.fields.reg);
+                    write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, val, 1);
+                    break;
+                }
+                case 0x8E: {
+                    mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t) LOAD_IP_BYTE;
+                    uint32_t op = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 1);
+                    write_seg(state, mod_reg_rm.fields.reg, op);
+                    break;
+                }
                 case 0x9E: {
                     flags_union ah_flags;
                     ah_flags.num = state->a.b.h;
@@ -761,5 +842,12 @@ void vm_run(vm_state_t* state, int max_cycles) {
             }
         }
         }
+
+#ifdef CFG_DIFF_TRACE
+        dump_state(state, &old_state);
+        memcpy(&old_state, state, sizeof(vm_state_t));
+#else
+        dump_state(state, NULL);
+#endif
     }
 }
