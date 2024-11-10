@@ -3,6 +3,8 @@ SRCS = src/cga_driver.c \
 	src/backend/linux/vm_mem.c \
 	src/backend/linux/vm_io.c \
 	src/backend/linux/cga.c \
+	src/backend/linux/i8253.c \
+	src/backend/linux/i8259.c \
 	src/vm.c \
 	src/dbg.c \
 	src/util.c

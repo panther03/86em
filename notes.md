@@ -29,3 +29,5 @@ if (flag) {
     }
 
 }
+
+Use 1.5 ticks per loop iteration i.e. Tick timer Once every other instruction

@@ -41,6 +41,8 @@ vm_state_t *vm_init()
     state->cycles = 0;
     state->bkpt = -1;
     state->bkpt_clear = true;
+    // No interrupt source by default
+    state->int_src = -1;
     return state;
 }
 
@@ -491,7 +493,6 @@ uint32_t x86_rotate(vm_state_t *state, uint8_t op, uint32_t x, uint32_t shamt, u
     {
         while (ro_temp_shamt != 0)
         {
-            uint8_t temp_cf = (x >> (op_size - 1));
             x = (x << 1) + state->flags.c_f;
             ro_temp_shamt -= 1;
         }
@@ -506,7 +507,6 @@ uint32_t x86_rotate(vm_state_t *state, uint8_t op, uint32_t x, uint32_t shamt, u
     {
         while (ro_temp_shamt != 0)
         {
-            uint8_t temp_cf = x & 1;
             // todo op_size correct here?
             x = (x >> 1) + (state->flags.c_f << op_size);
             ro_temp_shamt -= 1;
@@ -670,6 +670,52 @@ uint8_t insn_mode(uint8_t opc)
     }
 
     return 0;
+}
+
+static inline void x86_handle_interrupts(vm_state_t *state) {
+    int int_src = state->int_src;
+
+    if (int_src >= 0)  goto INTERRUPT_FOUND;
+
+    // NMI is not handled, nothing critical uses NMI in IBM PC
+
+    if (state->flags.i_f && io_int_poll()) {
+        int_src = io_int_ack();
+        goto INTERRUPT_FOUND;
+    }
+
+    if (state->flags.t_f) {
+        int_src = 1;
+        goto INTERRUPT_FOUND;
+    }
+
+    // No interrupts
+    return;
+
+INTERRUPT_FOUND:;
+    flags_union flags;
+    uint8_t temp_tf;
+
+    // TODO?
+    state->int_src = -1;
+
+    do {
+        // PUSH FLAGS
+        flags.fl = state->flags;
+        push_u16(state, flags.num);
+        // LET TEMP = TF
+        temp_tf = flags.fl.t_f;
+        // CLEAR IF & TF
+        state->flags.t_f = 0;
+        state->flags.i_f = 0;
+        // PUSH CS & IP
+        push_u16(state, state->cs);
+        push_u16(state, state->ip);
+        // CALL INTERRUPT SERVICE ROUTINE
+        assert(int_src < 256);
+        state->ip = load_u16(int_src * 4);
+        state->cs = load_u16(int_src * 4 + 2);
+    } while (temp_tf); // add NMI check here to enable NMI functionality
 }
 
 void vm_run(vm_state_t *state, int max_cycles)
@@ -962,6 +1008,15 @@ void vm_run(vm_state_t *state, int max_cycles)
                 store_u16(addr, state->a.x);
                 break;
             }
+            case 0xCF:
+            {
+                state->ip = pop_u16(state);
+                state->cs = pop_u16(state);
+                flags_union flags;
+                flags.num = pop_u16(state);
+                state->flags = flags.fl;
+                break;
+            }
             case 0xE6:
             {
                 uint32_t imm = LOAD_IP_BYTE;
@@ -981,7 +1036,6 @@ void vm_run(vm_state_t *state, int max_cycles)
             }
             case 0xEF:
             {
-                uint32_t imm = LOAD_IP_BYTE;
                 io_write_u16(state->d.x, state->a.x);
                 break;
             }
@@ -1056,6 +1110,8 @@ void vm_run(vm_state_t *state, int max_cycles)
             }
         }
         }
+
+        io_tick(state->cycles);
 
 #ifdef CFG_DIFF_TRACE
         dump_state(state, &old_state);

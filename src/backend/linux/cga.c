@@ -120,7 +120,7 @@ static inline void cga_init()
     size_t n = fread(cga_state.font, 1, CGA_FONTROM_SIZE, font_f);
     if (n != CGA_FONTROM_SIZE)
     {
-        printf("Invalid font ROM, read %d bytes instead of expected 2048\n", n);
+        printf("Invalid font ROM, read %ld bytes instead of expected 2048\n", n);
         exit(1);
     }
 
@@ -133,6 +133,7 @@ static inline void cga_init()
 
 void *cga_thread(void *arg)
 {
+    (void)arg;
     pthread_detach(pthread_self());
 
     cga_init();

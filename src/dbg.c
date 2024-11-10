@@ -40,7 +40,7 @@ typedef struct {
     bool consumed;
 } arg_split_t;
 
-const char* arg_next(arg_split_t *it) {
+char* arg_next(arg_split_t *it) {
     if (it->consumed) return NULL;
     assert(it->buf);
 
@@ -55,7 +55,7 @@ const char* arg_next(arg_split_t *it) {
         return NULL;
     }
 
-    const char* start = it->buf;
+    char* start = it->buf;
 
     // Move to the next whitespace or end of string
     while (*(it->buf) && !isspace(*(it->buf))) {

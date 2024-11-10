@@ -56,10 +56,12 @@ typedef struct {
     uint16_t es;
     uint16_t ss;
     uint16_t ip;
+    // TODO change this to a union type
     x86_flags_t flags;
     int32_t bkpt;
     bool bkpt_clear;
     uint64_t cycles;
+    int int_src;
 } vm_state_t;
 
 vm_state_t* vm_init();
