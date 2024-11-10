@@ -7,6 +7,7 @@
 void io_init();
 
 void io_write_u16(uint16_t addr, uint16_t data);
+uint16_t io_read_u16(uint16_t addr);
 
 void io_tick(uint64_t cycles);
 

@@ -315,6 +315,19 @@ uint32_t get_16b_mem_base(vm_state_t *state, uint8_t rm)
     }
 }
 
+static inline uint32_t mod_rm_effective_addr(vm_state_t *state, uint8_t mod, uint8_t rm) {
+    uint32_t base = get_16b_mem_base(state, rm);
+    if (mod == 0b01)
+    {
+        base += LOAD_IP_BYTE;
+    }
+    else if (mod == 0b10)
+    {
+        base += LOAD_IP_WORD(state);
+    }
+    return base;
+}
+
 // TODO these should just take the whole mod_reg_rm byte, splitting it up like this doesn't make sense
 uint32_t read_mod_rm(vm_state_t *state, uint8_t mod, uint8_t rm, uint8_t is_16)
 {
@@ -326,18 +339,11 @@ uint32_t read_mod_rm(vm_state_t *state, uint8_t mod, uint8_t rm, uint8_t is_16)
     }
     else
     {
-        uint32_t base = get_16b_mem_base(state, rm);
-        if (mod == 0b01)
-        {
-            base += LOAD_IP_BYTE;
-        }
-        else if (mod == 0b10)
-        {
-            base += LOAD_IP_WORD(state);
-        }
-        return load_u16(base);
+        return load_u16(mod_rm_effective_addr(state, mod, rm));
     }
 }
+
+
 
 void write_mod_rm(vm_state_t *state, uint8_t mod, uint8_t rm, uint32_t val, uint8_t is_16)
 {
@@ -355,16 +361,7 @@ void write_mod_rm(vm_state_t *state, uint8_t mod, uint8_t rm, uint32_t val, uint
     }
     else
     {
-        uint32_t base = get_16b_mem_base(state, rm);
-        if (mod == 0b01)
-        {
-            base += LOAD_IP_BYTE;
-        }
-        else if (mod == 0b10)
-        {
-            base += LOAD_IP_WORD(state);
-        }
-        store_u16(base, val);
+        store_u16(mod_rm_effective_addr(state, mod, rm), val);
     }
 }
 
@@ -605,6 +602,156 @@ uint32_t x86_arith(vm_state_t *state, uint8_t fnc, uint32_t op1, uint32_t op2, u
     }
 }
 
+static inline void x86_string_insn(vm_state_t *state, uint8_t opc) {
+    uint8_t sz = opc & 0x1;
+    int src_addr = SEGMENT(state->ds, state->si);
+    int dest_addr = SEGMENT(state->es, state->di);
+    int si_ofs = 0;
+    int di_ofs = 0;
+    switch(opc) {
+        // MOVS (8-bit)
+        case 0xA4: {
+            store_u8(dest_addr, load_u8(src_addr));
+            si_ofs = 1;
+            di_ofs = 1;
+            break;
+        }
+        // MOVS (16-bit)
+        case 0xA5: {
+            store_u16(dest_addr, load_u16(src_addr));
+            si_ofs = 2;
+            di_ofs = 2;
+            break;
+        }
+        // CMPS (8-bit)
+        case 0xA6: {
+            x86_sub(state, load_u8(src_addr), load_u8(dest_addr), 0, sz);
+            si_ofs = 1;
+            di_ofs = 1;
+            break;
+        }
+        // CMPS (16-bit)
+        case 0xA7: {
+            x86_sub(state, load_u16(src_addr), load_u16(dest_addr), 0, sz);
+            si_ofs = 2;
+            di_ofs = 2;
+            break;
+        }
+        // STOS (8-bit) 
+        case 0xAA: {
+            store_u8(dest_addr, state->a.b.l);
+            si_ofs = 1;
+            di_ofs = 1;
+            break;
+        }
+        // STOS (16-bit)
+        case 0xAB: {
+            store_u8(dest_addr, state->a.x);
+            si_ofs = 2;
+            di_ofs = 2;
+            break;
+        }
+        // LODS (8-bit)
+        case 0xAC: {
+            state->a.b.l = load_u8(src_addr);
+            si_ofs = 1;
+            break;
+        }
+        // LODS (16-bit)
+        case 0xAD: {
+            state->a.x = load_u16(src_addr);
+            si_ofs = 2;
+            break;
+        }
+        // SCAS (8-bit) 
+        case 0xAE: {
+            x86_sub(state, state->a.b.l, load_u8(dest_addr), 0, sz);
+            si_ofs = 1;
+            di_ofs = 1;
+            break;
+        }
+        // SCAS (16-bit) 
+        case 0xAF: {
+            x86_sub(state, state->a.x, load_u8(dest_addr), 0, sz);
+            si_ofs = 2;
+            di_ofs = 2;
+            break;
+        }
+    }
+    if (state->flags.d_f) {
+        state->si -= si_ofs;
+        state->di -= di_ofs;
+    } else {
+        state->si += si_ofs;
+        state->di += di_ofs;
+    }
+}
+
+static inline void x86_group1(vm_state_t *state, uint8_t is_16) {
+    mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+    uint32_t op1 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, is_16);
+
+    switch (mod_reg_rm.fields.reg) {
+        // TEST
+        case 0b000: {
+            uint32_t imm = is_16 ? LOAD_IP_WORD(state) : LOAD_IP_BYTE;
+            x86_and(state, op1, imm, is_16);
+            break;
+        }
+        // NOT
+        case 0b010: {
+            write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, ~op1, is_16);
+            break;
+        }
+        // NEG
+        case 0b011: {
+            // TODO is the carry flag logic different here or does this work
+            op1 = x86_sub(state, 0, op1, 0, is_16);
+            write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, op1, is_16);
+            break;
+        }
+        // MUL
+        case 0b100: {
+            if (is_16) {
+                uint32_t prod = state->a.x * op1;
+                state->a.x = prod;
+                state->d.x = prod >> 16;
+                state->flags.o_f = state->flags.c_f = (state->a.x != 0);
+            } else {
+                state->a.x = state->a.b.l * op1;
+                state->flags.o_f = state->flags.c_f = (state->a.b.h != 0);
+            }
+            break;
+        }
+        // IMUL
+        case 0b101: {
+            if (is_16) {
+                int32_t ax_s = SEXT_16_32(state->a.x); 
+                int32_t prod = ax_s * SEXT_16_32(op1);
+                state->a.x = prod;
+                state->d.x = prod >> 16;
+                state->flags.o_f = state->flags.c_f = (state->a.x != prod);
+            } else {
+                state->a.x = SEXT_8_16(state->a.b.l) * SEXT_8_16(op1);
+                state->flags.o_f = state->flags.c_f = (state->a.b.l == state->a.x);
+            }
+            break;
+        }
+        // DIV/IDIV
+        case 0b110:
+        case 0b111: {
+            // TODO divide exceptions
+            uint32_t divisor = (mod_reg_rm.fields.reg & 1) ? (SEXT_16_32(op1)) : (int32_t) op1;
+            uint32_t dividend = (state->d.x << 16) + state->a.x;
+            uint32_t remainder = dividend % divisor;
+            dividend /= divisor;
+            state->a.x = dividend;
+            state->d.x = remainder;
+            break;
+        }
+    }
+}
+
 // TODO: make this into a table
 uint8_t insn_mode(uint8_t opc)
 {
@@ -667,6 +814,11 @@ uint8_t insn_mode(uint8_t opc)
     {
         // Shift
         return 12;
+    }
+    else if ((opc & 0xF4) == 0xA4 || ((opc & 0xFE) == 0xAA))
+    {
+        // String instruction
+        return 13;
     }
 
     return 0;
@@ -739,10 +891,19 @@ void vm_run(vm_state_t *state, int max_cycles)
             state->bkpt_clear = false;
         }
         uint8_t opc = LOAD_IP_BYTE;
+        uint8_t pfx = 0;
         state->cycles++;
 
+        if ((opc & 0xFC) == 0xF0) {
+            // ignore LOCK prefix
+            pfx = (opc & 2) ? opc : 0;
+            
+            // Assume only one prefix
+            opc = LOAD_IP_BYTE;
+        }
+
         uint8_t mode = insn_mode(opc);
-        printf("Op: %02x; Mode: %d\n", opc, mode);
+        printf("Op: %02x; Pfx: %02x; Mode: %d\n", opc, pfx, mode);
 
         switch (insn_mode(opc))
         {
@@ -944,10 +1105,65 @@ void vm_run(vm_state_t *state, int max_cycles)
             write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, op1, s);
             break;
         }
+        case 13: {
+            // String instruction
+            bool compare_enable = ((opc & 0x06) == 0x6);
+            uint16_t counter = pfx ? 1 : state->c.x;
+            while (counter != 0) {
+                x86_string_insn(state, opc);
+                counter--;
+                if (compare_enable && ((pfx & 0x1) ^ state->flags.z_f)) break;
+            }
+            if (pfx) {
+                state->c.x = counter;
+            }
+            break;
+        }
         default:
         {
             switch (opc)
             {
+            case 0x06: { push_u16(state, state->es); break; }
+            case 0x07: { state->es = pop_u16(state); break; }
+            case 0x16: { push_u16(state, state->ss); break; }
+            case 0x17: { state->ss = pop_u16(state); break; }
+            case 0x0E: { push_u16(state, state->cs); break; }
+            case 0x0F: { state->ds = pop_u16(state); break; }
+            case 0x1F: { state->ds = pop_u16(state); break; }
+            case 0x84: 
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint32_t op1 = read_reg_u8(state, mod_reg_rm.fields.reg);
+                uint32_t op2 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 0);
+                x86_and(state, op1, op2, 0);
+                break;
+            }
+            case 0x85: 
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint32_t op1 = read_reg_u16(state, mod_reg_rm.fields.reg);
+                uint32_t op2 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 1);
+                x86_and(state, op1, op2, 1);
+                break;
+            }
+            case 0x86: 
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint32_t op1 = read_reg_u8(state, mod_reg_rm.fields.reg);
+                uint32_t op2 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 0);
+                write_reg_u8(state, mod_reg_rm.fields.reg, op2);
+                write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, op1, 0);
+                break;
+            }
+            case 0x87:
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint32_t op1 = read_reg_u16(state, mod_reg_rm.fields.reg);
+                uint32_t op2 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 1);
+                write_reg_u16(state, mod_reg_rm.fields.reg, op2);
+                write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, op1, 1);
+                break;
+            }
             case 0x8C:
             {
                 mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
@@ -955,11 +1171,65 @@ void vm_run(vm_state_t *state, int max_cycles)
                 write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, val, 1);
                 break;
             }
+            case 0x8D:
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                // TODO: i guess this should be the case? 
+                // no point in doing effective address of a register
+                assert(mod_reg_rm.fields.mod != 0b11);
+                uint32_t base = mod_rm_effective_addr(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm);
+                write_reg_u16(state, mod_reg_rm.fields.reg, base);
+                break;
+            }
             case 0x8E:
             {
                 mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
                 uint32_t op = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 1);
                 write_seg(state, mod_reg_rm.fields.reg, op);
+                break;
+            }
+            case 0x8F:
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint16_t tos = pop_u16(state);
+                write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, tos, 1);
+                break;
+            }
+            // CBW
+            case 0x98:
+            {
+                state->a.x = SEXT_8_16(state->a.b.l);
+                break;
+            }
+            // CWD
+            case 0x99:
+            {
+                state->d.x = (state->a.x & 0x80) ? 0xFF : 0;
+                break;
+            }
+            // CALL (FAR, ABSOLUTE)
+            case 0x9A:
+            {
+                uint32_t ip = LOAD_IP_WORD(state);
+                uint32_t cs = LOAD_IP_WORD(state);
+                push_u16(state, state->cs);
+                push_u16(state, state->ip);
+                state->ip = ip;
+                state->cs = cs;
+                break;
+            }
+            case 0x9C:
+            {
+                flags_union flags;
+                flags.fl = state->flags;
+                push_u16(state, flags.num);
+                break;
+            }
+            case 0x9D:
+            {
+                flags_union flags;
+                flags.num = pop_u16(state);
+                state->flags = flags.fl;
                 break;
             }
             case 0x9E:
@@ -1008,6 +1278,89 @@ void vm_run(vm_state_t *state, int max_cycles)
                 store_u16(addr, state->a.x);
                 break;
             }
+            case 0xA8: 
+            {
+                uint32_t imm = LOAD_IP_BYTE;
+                x86_and(state, state->a.b.l, imm, 0);
+                break;
+            }
+            case 0xA9: 
+            {
+                uint32_t imm = LOAD_IP_WORD(state);
+                x86_and(state, state->a.b.l, imm, 1);
+                break;
+            }
+            case 0xC2:
+            {
+                uint32_t imm = LOAD_IP_WORD(state);
+                state->ip = pop_u16(state);
+                state->sp += imm;
+                break;
+            }
+            case 0xC3:
+            {
+                state->ip = pop_u16(state);
+                break;
+            }
+            // LES
+            case 0xC4: 
+            // LDS
+            case 0xC5:
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint32_t op1 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 1);
+                write_reg_u16(state, mod_reg_rm.fields.reg, load_u16(op1));
+                if (opc & 1) {
+                    state->ds = load_u16(op1+2);
+                } else {
+                    state->es = load_u16(op1+2);
+                }
+                break;
+            }
+            case 0xC6: 
+            case 0xC7:
+            {
+                uint8_t s = opc & 1;
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint32_t imm = s ? LOAD_IP_WORD(state) : LOAD_IP_BYTE;
+                write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.reg, imm,s);
+                break;
+            }
+            case 0xCA:
+            {
+                state->ip = pop_u16(state);
+                state->cs = pop_u16(state);
+                break;
+            }
+            case 0xCB:
+            {
+                uint32_t imm = LOAD_IP_WORD(state);
+                state->ip = pop_u16(state);
+                state->cs = pop_u16(state);
+                state->sp += imm;
+                break;
+            }
+            case 0xCC:
+            {
+                assert(state->int_src < 0);
+                state->int_src = 3;
+                break;
+            }
+            case 0xCD:
+            {
+                assert(state->int_src < 0);
+                uint32_t imm = LOAD_IP_BYTE;
+                state->int_src = imm;
+                break;
+            }
+            case 0xCE:
+            {
+                assert(state->int_src < 0);
+                if (state->flags.o_f) {
+                    state->int_src = 4;
+                }
+                break;
+            }
             case 0xCF:
             {
                 state->ip = pop_u16(state);
@@ -1015,6 +1368,51 @@ void vm_run(vm_state_t *state, int max_cycles)
                 flags_union flags;
                 flags.num = pop_u16(state);
                 state->flags = flags.fl;
+                break;
+            }
+            // XLATB
+            case 0xD7:
+            {
+                state->a.b.l = load_u8(SEGMENT(state->ds, state->b.x) + state->a.b.l);
+                break;
+            }
+            // LOOPNZ
+            case 0xE0: {
+                uint8_t ofs = LOAD_IP_BYTE;
+                state->c.x--;
+                if ((state->flags.z_f == 0) && state->c.x) {
+                    state->ip += SEXT_8_16(ofs);
+                }
+                break;
+            }
+            // LOOPZ
+            case 0xE1: {
+                uint8_t ofs = LOAD_IP_BYTE;
+                state->c.x--;
+                if (state->flags.z_f && state->c.x) {
+                    state->ip += SEXT_8_16(ofs);
+                }
+                break;
+            }
+            // LOOP
+            case 0xE2: {
+                uint8_t ofs = LOAD_IP_BYTE;
+                state->c.x--;
+                if (state->c.x) {
+                    state->ip += SEXT_8_16(ofs);
+                }
+                break;
+            }
+            case 0xE4:
+            {
+                uint32_t imm = LOAD_IP_BYTE;
+                state->a.b.l = io_read_u16(imm);
+                break;
+            }
+            case 0xE5:
+            {
+                uint32_t imm = LOAD_IP_BYTE;
+                state->a.x = io_read_u16(imm);
                 break;
             }
             case 0xE6:
@@ -1027,6 +1425,16 @@ void vm_run(vm_state_t *state, int max_cycles)
             {
                 uint32_t imm = LOAD_IP_BYTE;
                 io_write_u16(imm, state->a.x);
+                break;
+            }
+            case 0xEC:
+            {
+                state->a.b.l = io_read_u16(state->d.x);
+                break;
+            }
+            case 0xED:
+            {
+                state->a.x = io_read_u16(state->d.x);
                 break;
             }
             case 0xEE:
@@ -1078,6 +1486,16 @@ void vm_run(vm_state_t *state, int max_cycles)
                 printf("CPU halt\n");
                 return;
             }
+            case 0xF5:
+            {
+                state->flags.c_f = ~state->flags.c_f;
+                break;
+            }
+            case 0xF6:
+            case 0xF7: {
+                x86_group1(state, opc & 1);
+                break;
+            }
             case 0xF8:
             {
                 // clc
@@ -1102,6 +1520,81 @@ void vm_run(vm_state_t *state, int max_cycles)
                 state->flags.i_f = 1;
                 break;
             }
+            case 0xFC:
+            {
+                // cld
+                state->flags.d_f = 0;
+                break;
+            }
+            case 0xFD:
+            {
+                // std
+                state->flags.d_f = 1;
+                break;
+            }
+            case 0xFE:
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint32_t op1 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 0);
+                op1 = op1 + mod_reg_rm.fields.reg ? -1 : 1;
+                write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, op1, 0);
+                break;
+            }
+            case 0xFF:
+            {
+                mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
+                uint32_t op1 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, 1);                
+
+                switch (mod_reg_rm.fields.reg) {
+                    // TODO: why does the manual say mem16 specifically but not reg16/mem16?
+                    // INC
+                    case 0b000: {
+                        write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.reg, op1 + 1, 1);
+                        break;
+                    }
+                    // DEC
+                    case 0b001: {
+                        write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.reg, op1 - 1, 1);
+                        break;
+                    }
+                    // Near call absolute
+                    case 0b010: {
+                        push_u16(state, state->ip);
+                        state->ip = op1;
+                        break;
+                    }
+                    // Far call absolute
+                    case 0b011: {
+                        push_u16(state, state->cs);
+                        push_u16(state, state->ip);
+                        state->ip = load_u16(op1);
+                        state->cs = load_u16(op1+2);
+                        break;
+                    }
+                    // Near jump absolute
+                    case 0b100: {
+                        state->ip = op1;
+                        break;
+                    }
+                    // Far jump absolute 
+                    // TODO idk if it works the same as the far call
+                    case 0b101: {
+                        state->ip = load_u16(op1);
+                        state->cs = load_u16(op1+2);
+                        break;
+                    }
+                    // Push
+                    case 0b110: {
+                        push_u16(state, op1);
+                        break;
+                    }
+                    default: {
+                        printf("unrecognized group 2 function: %d\n", mod_reg_rm.fields.reg);
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                break;
+            }
             default:
             {
                 printf("unrecognized opcode: %02x\n", opc);
@@ -1121,3 +1614,4 @@ void vm_run(vm_state_t *state, int max_cycles)
 #endif
     }
 }
+
