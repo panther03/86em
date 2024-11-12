@@ -1,0 +1,3 @@
+[submodule "tests/8088"]
+	path = tests/8088
+	url = https://github.com/SingleStepTests/8088.git

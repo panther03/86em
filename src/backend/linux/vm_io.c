@@ -17,6 +17,10 @@ uint8_t io_int_ack() {
     return i8259_ack();
 }
 
+bool io_int_poll() {
+    return i8259_int();
+}
+
 void io_access_u16(uint16_t addr) {
     static bool gfx_initd = false;
     if (CGA_REG_START <= addr && addr <= CGA_REG_END && !gfx_initd) {

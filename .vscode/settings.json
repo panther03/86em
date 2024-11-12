@@ -4,5 +4,9 @@
         "vm_mem.h": "c",
         "stdlib.h": "c",
         "util.h": "c"
-    }
+    },
+    "clangd.fallbackFlags": [
+        "-I${workspaceFolder}/include",
+        "-I${workspaceFolder}/include/backend/linux",
+    ],
 }

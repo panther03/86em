@@ -109,7 +109,7 @@ static inline void cga_init()
         exit(1);
     }
 
-    FILE *font_f = fopen("cgatext.bin", "r");
+    FILE *font_f = fopen("roms/cgatext.bin", "r");
     if (!font_f)
     {
         printf("Failed to open CGA font ROM: cgatext.bin\n");

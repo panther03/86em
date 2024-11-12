@@ -1621,6 +1621,7 @@ void vm_run(vm_state_t *state, int max_cycles)
         }
 
         io_tick(state->cycles);
+        x86_handle_interrupts(state);
 
 #ifdef CFG_DIFF_TRACE
         dump_state(state, &old_state);

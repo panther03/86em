@@ -1,23 +1,27 @@
-PROG ?= add
-SRCS = src/main.c \
-	src/backend/linux/vm_mem.c \
-	src/backend/linux/vm_io.c \
-	src/backend/linux/cga.c \
-	src/backend/linux/i8253.c \
-	src/backend/linux/i8259.c \
-	src/vm.c \
-	src/dbg.c \
-	src/util.c
+BACKEND ?= LINUX
+TESTROUTINE ?= 
 
-vm: 86EM TESTPROG
+BUILD = build/
+SRCS = src/vm.c \
+	   src/dbg.c \
+	   src/util.c
+OBJS = $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 
-86EM: build/86em
-build/86em: $(SRCS)
-	@mkdir -p build/
-	gcc -Wall -Wextra -Isrc/ $(shell sdl2-config --cflags) -g -o $@ $^ -lreadline $(shell sdl2-config --libs) 
+CFLAGS = -Wall -Wextra -Iinclude/
 
-TESTPROG: build/testprog.bin
-build/testprog.bin: tests/$(PROG).asm
-	@mkdir -p build/
-	nasm -O0 $^ -f bin -o $@
-	
+SRCS_LINUX = $(wildcard ./src/backend/linux/*.c)
+OBJS_LINUX = $(patsubst ./src/%.c,$(BUILD)/%.o,$(SRCS_LINUX))
+CFLAGS_LINUX = -Iinclude/backend/linux $(shell sdl2-config --cflags) -g 
+LDFLAGS_LINUX = -lreadline $(shell sdl2-config --libs) 
+
+all: 86EM
+
+86EM: $(BUILD)/86em
+$(BUILD)/86em: $(OBJS) $(OBJS_$(BACKEND)) $(BUILD)/main.o
+	@mkdir -p $(BUILD)/
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDFLAGS_$(BACKEND))
+
+$(BUILD)/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CFLAGS_$(BACKEND)) -c -o $@ $<
+
