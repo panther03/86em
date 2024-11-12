@@ -43,6 +43,9 @@ vm_state_t *vm_init()
     state->bkpt_clear = true;
     // No interrupt source by default
     state->int_src = -1;
+    state->seg_override = -1;
+
+    io_init();
     return state;
 }
 
@@ -100,10 +103,21 @@ void dump_state(vm_state_t *state, vm_state_t *old_state)
     HIGHLIGHT(state->d.x, old_state->d.x)
     printf("DX %04x\n", state->d.x);
     HIGHLIGHT_END
-
+    
     HIGHLIGHT(state->cs, old_state->cs)
     printf("CS %04x\t", state->cs);
     HIGHLIGHT_END
+    HIGHLIGHT(state->ds, old_state->ds)
+    printf("DS %04x\t", state->ds);
+    HIGHLIGHT_END
+    HIGHLIGHT(state->ss, old_state->ss)
+    printf("SS %04x\t", state->ss);
+    HIGHLIGHT_END
+    HIGHLIGHT(state->es, old_state->es)
+    printf("ES %04x\n", state->es);
+    HIGHLIGHT_END
+
+    
     HIGHLIGHT(state->si, old_state->si)
     printf("SI %04x\t", state->si);
     HIGHLIGHT_END
@@ -116,22 +130,7 @@ void dump_state(vm_state_t *state, vm_state_t *old_state)
     HIGHLIGHT(state->sp, old_state->sp)
     printf("SP %04x\n", state->sp);
     HIGHLIGHT_END
-
-    HIGHLIGHT(state->fs, old_state->fs)
-    printf("FS %04x\t", state->fs);
-    HIGHLIGHT_END
-    HIGHLIGHT(state->ds, old_state->ds)
-    printf("DS %04x\t", state->ds);
-    HIGHLIGHT_END
-    HIGHLIGHT(state->gs, old_state->gs)
-    printf("GS %04x\t", state->gs);
-    HIGHLIGHT_END
-    HIGHLIGHT(state->ss, old_state->ss)
-    printf("SS %04x\t", state->ss);
-    HIGHLIGHT_END
-    HIGHLIGHT(state->es, old_state->es)
-    printf("ES %04x\n", state->es);
-    HIGHLIGHT_END
+    
     flags_union flags_u;
     flags_u.fl = state->flags;
 #ifdef CFG_DIFF_TRACE
@@ -315,6 +314,15 @@ uint32_t get_16b_mem_base(vm_state_t *state, uint8_t rm)
     }
 }
 
+static inline uint16_t x86_get_data_segment(vm_state_t *state) {
+    // Segment override is an offset
+    // -1 on the default (DS), 0 - 3 otherwise
+    // -1 wraps back around to 3 if we take mod 4 (& 0b11)
+    uint16_t segment = *(&state->es + ((4 + state->seg_override) & 0b11));
+    state->seg_override_clear = 0;
+    return segment;
+}
+
 static inline uint32_t mod_rm_effective_addr(vm_state_t *state, uint8_t mod, uint8_t rm) {
     uint32_t base = get_16b_mem_base(state, rm);
     if (mod == 0b01)
@@ -325,7 +333,9 @@ static inline uint32_t mod_rm_effective_addr(vm_state_t *state, uint8_t mod, uin
     {
         base += LOAD_IP_WORD(state);
     }
-    return base;
+    printf("ovr: %d\n", state->seg_override);
+    assert(-1 <= state->seg_override && state->seg_override <= 3);
+    return SEGMENT(x86_get_data_segment(state), base);
 }
 
 // TODO these should just take the whole mod_reg_rm byte, splitting it up like this doesn't make sense
@@ -604,7 +614,7 @@ uint32_t x86_arith(vm_state_t *state, uint8_t fnc, uint32_t op1, uint32_t op2, u
 
 static inline void x86_string_insn(vm_state_t *state, uint8_t opc) {
     uint8_t sz = opc & 0x1;
-    int src_addr = SEGMENT(state->ds, state->si);
+    int src_addr = SEGMENT(x86_get_data_segment(state), state->si);
     int dest_addr = SEGMENT(state->es, state->di);
     int si_ofs = 0;
     int di_ofs = 0;
@@ -819,6 +829,9 @@ uint8_t insn_mode(uint8_t opc)
     {
         // String instruction
         return 13;
+    } else if ((opc & 0xFC) == 0xF0 || (opc & 0xE7) == 0x26) {
+        // Prefix
+        return 14;
     }
 
     return 0;
@@ -891,18 +904,22 @@ void vm_run(vm_state_t *state, int max_cycles)
             state->bkpt_clear = false;
         }
         uint8_t opc = LOAD_IP_BYTE;
+        uint8_t mode;
         uint8_t pfx = 0;
         state->cycles++;
 
-        if ((opc & 0xFC) == 0xF0) {
-            // ignore LOCK prefix
-            pfx = (opc & 2) ? opc : 0;
-            
-            // Assume only one prefix
+        // Get all prefixes
+        while ((mode = insn_mode(opc)) == 14) {
+            if ((opc & 0xFC) == 0xF0) {
+                // ignore LOCK prefix
+                pfx = (opc & 2) ? opc : 0;
+            } else {
+                // Must be a segment override
+                state->seg_override = (opc >> 3) & 0b11;
+            }
             opc = LOAD_IP_BYTE;
         }
 
-        uint8_t mode = insn_mode(opc);
         printf("Op: %02x; Pfx: %02x; Mode: %d\n", opc, pfx, mode);
 
         switch (insn_mode(opc))
@@ -1082,7 +1099,7 @@ void vm_run(vm_state_t *state, int max_cycles)
             uint8_t s = opc & 0x1;
             uint8_t x = (opc >> 1) & 0x1;
             mod_reg_rm_t mod_reg_rm = (mod_reg_rm_t)LOAD_IP_BYTE;
-            uint32_t imm = (s ^ x) ? (SEXT_8_16(LOAD_IP_BYTE)) : LOAD_IP_WORD(state);
+            uint32_t imm = s ? (x ? (SEXT_8_16(LOAD_IP_BYTE)) : LOAD_IP_WORD(state)) : (LOAD_IP_BYTE);
             uint32_t op1 = read_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, s);
             op1 = x86_arith(state, mod_reg_rm.fields.reg, op1, imm, s);
             write_mod_rm(state, mod_reg_rm.fields.mod, mod_reg_rm.fields.rm, op1, s);
@@ -1128,7 +1145,6 @@ void vm_run(vm_state_t *state, int max_cycles)
             case 0x16: { push_u16(state, state->ss); break; }
             case 0x17: { state->ss = pop_u16(state); break; }
             case 0x0E: { push_u16(state, state->cs); break; }
-            case 0x0F: { state->ds = pop_u16(state); break; }
             case 0x1F: { state->ds = pop_u16(state); break; }
             case 0x84: 
             {
@@ -1253,28 +1269,28 @@ void vm_run(vm_state_t *state, int max_cycles)
             case 0xA0:
             {
                 uint32_t offset = LOAD_IP_BYTE;
-                uint32_t addr = SEGMENT(state->ds, offset);
+                uint32_t addr = SEGMENT(x86_get_data_segment(state), offset);
                 state->a.b.l = load_u8(addr);
                 break;
             }
             case 0xA1:
             {
                 uint32_t offset = LOAD_IP_WORD(state);
-                uint32_t addr = SEGMENT(state->ds, offset);
+                uint32_t addr = SEGMENT(x86_get_data_segment(state), offset);
                 state->a.x = load_u16(addr);
                 break;
             }
             case 0xA2:
             {
                 uint32_t offset = LOAD_IP_BYTE;
-                uint32_t addr = SEGMENT(state->ds, offset);
+                uint32_t addr = SEGMENT(x86_get_data_segment(state), offset);
                 store_u8(addr, state->a.b.l);
                 break;
             }
             case 0xA3:
             {
                 uint32_t offset = LOAD_IP_WORD(state);
-                uint32_t addr = SEGMENT(state->ds, offset);
+                uint32_t addr = SEGMENT(x86_get_data_segment(state), offset);
                 store_u16(addr, state->a.x);
                 break;
             }
@@ -1373,7 +1389,7 @@ void vm_run(vm_state_t *state, int max_cycles)
             // XLATB
             case 0xD7:
             {
-                state->a.b.l = load_u8(SEGMENT(state->ds, state->b.x) + state->a.b.l);
+                state->a.b.l = load_u8(SEGMENT(x86_get_data_segment(state), state->b.x) + state->a.b.l);
                 break;
             }
             // LOOPNZ

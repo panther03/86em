@@ -49,12 +49,10 @@ typedef struct {
     uint16_t di;
     uint16_t bp;
     uint16_t sp;
-    uint16_t cs;
-    uint16_t fs;
-    uint16_t ds;
-    uint16_t gs;
     uint16_t es;
+    uint16_t cs;
     uint16_t ss;
+    uint16_t ds;
     uint16_t ip;
     // TODO change this to a union type
     x86_flags_t flags;
@@ -62,6 +60,9 @@ typedef struct {
     bool bkpt_clear;
     uint64_t cycles;
     int int_src;
+    // TODO remove this Shit
+    int seg_override;
+    int seg_override_clear;
 } vm_state_t;
 
 vm_state_t* vm_init();

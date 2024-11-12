@@ -15,6 +15,8 @@ jge pass
 
 out 0xFF, al
 
+
+
 fail:
 mov    al, 1
 out    0xFF, al

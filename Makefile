@@ -1,5 +1,5 @@
 PROG ?= add
-SRCS = src/cga_driver.c \
+SRCS = src/main.c \
 	src/backend/linux/vm_mem.c \
 	src/backend/linux/vm_io.c \
 	src/backend/linux/cga.c \

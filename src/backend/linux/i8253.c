@@ -27,6 +27,7 @@ void i8253_cr_write(uint8_t val) {
         } else {
             i8253_state.status = (i8253_state.status & 0b11000000) | (val & 0b00111111);
         }
+        *i8253_state.out[0] = false;
         i8253_state.access_ctrs[0] = 0;
     }
 }
@@ -48,6 +49,7 @@ void i8253_timer_write(uint8_t ofs, uint8_t val) {
                 break;
             }
         }
+        *i8253_state.out[0] = false;
         i8253_state.ctr_limits[0] = i8253_state.ctrs[0].x;
         i8253_state.access_ctrs[0]++;
     }
