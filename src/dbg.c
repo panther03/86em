@@ -35,45 +35,7 @@ char * rl_gets ()
   return (line_read);
 }
 
-typedef struct {
-    char* buf;
-    bool consumed;
-} arg_split_t;
-
-char* arg_next(arg_split_t *it) {
-    if (it->consumed) return NULL;
-    assert(it->buf);
-
-    // Skip leading whitespace
-    while (isspace(*(it->buf))) {
-        it->buf++;
-    }
-
-    // End of string? Iterator consumed
-    if (*(it->buf) == '\0') {
-        it->consumed = true;
-        return NULL;
-    }
-
-    char* start = it->buf;
-
-    // Move to the next whitespace or end of string
-    while (*(it->buf) && !isspace(*(it->buf))) {
-        it->buf++;
-    }
-
-    // Null-terminate the current token if not at the end
-    if (*(it->buf)) {
-        *(it->buf) = '\0';
-        it->buf++;
-    } else {
-        it->consumed = true;
-    }
-
-    return start;
-}
-
-void dbg_intf(vm_state_t* state) {
+void dbg_intf(vm_t* vm) {
     while (1) {
         char* line = rl_gets();
         if (line == NULL) {
@@ -92,9 +54,9 @@ void dbg_intf(vm_state_t* state) {
           if (cyc != NULL) {
             cyc_d = atoi(cyc);
           }
-          vm_run(state, cyc_d);
+          vm_run(vm, cyc_d);
         } else if (strcmp(cmd, "step") == 0 || strcmp(cmd, "s") == 0) {
-          vm_run(state, 1);
+          vm_run(vm, 1);
         } else if (strcmp(cmd, "bkpt") == 0 || strcmp(cmd, "b") == 0) {
           char *bkpt = arg_next(&it);
 
@@ -106,10 +68,10 @@ void dbg_intf(vm_state_t* state) {
               printf("Expected breakpoint argument, either segment or IP in hex");
               continue;
             }
-            bkpt_d = SEGMENT(state->cs, bkpt_d);
+            bkpt_d = SEGMENT(vm->cpu.cs, bkpt_d);
           }
-          state->bkpt = bkpt_d;
-          state->bkpt_clear = false;
+          vm->bkpt = bkpt_d;
+          vm->bkpt_clear = false;
         } else {
           printf("unknown command: %s\n", cmd);
         }

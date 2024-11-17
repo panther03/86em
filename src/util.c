@@ -1,6 +1,9 @@
-#include <unistd.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
+#include <assert.h>
+#include <ctype.h>
 
 #include "util.h"
 
@@ -15,4 +18,39 @@ int parse_offset_segment(char* offset_segment) {
     int addr = SEGMENT(base, offset);
     printf("Loading at %x\n", addr);
     return addr;
+}
+
+
+
+char* arg_next(arg_split_t *it) {
+    if (it->consumed) return NULL;
+    assert(it->buf);
+
+    // Skip leading whitespace
+    while (isspace(*(it->buf))) {
+        it->buf++;
+    }
+
+    // End of string? Iterator consumed
+    if (*(it->buf) == '\0') {
+        it->consumed = true;
+        return NULL;
+    }
+
+    char* start = it->buf;
+
+    // Move to the next whitespace or end of string
+    while (*(it->buf) && !isspace(*(it->buf))) {
+        it->buf++;
+    }
+
+    // Null-terminate the current token if not at the end
+    if (*(it->buf)) {
+        *(it->buf) = '\0';
+        it->buf++;
+    } else {
+        it->consumed = true;
+    }
+
+    return start;
 }

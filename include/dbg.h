@@ -3,6 +3,6 @@
 
 #include "vm.h"
 
-void dbg_intf(vm_state_t* state);
+void dbg_intf(vm_t* state);
 
 #endif // DBG_H

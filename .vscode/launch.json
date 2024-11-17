@@ -8,10 +8,10 @@
             "type": "gdb",
             "request": "launch",
             "name": "Launch Program",
-            "target": "./build/86em",
+            "target": "./build/testdriver",
             "cwd": "${workspaceRoot}",
             "valuesFormatting": "parseText",
-            "arguments": "testprog.bin 1048560",
+            "arguments": "tests/8088/v2/00.json.gz",
         },
         {
             "name": "Launch emulator",

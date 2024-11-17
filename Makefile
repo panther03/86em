@@ -21,7 +21,16 @@ $(BUILD)/86em: $(OBJS) $(OBJS_$(BACKEND)) $(BUILD)/main.o
 	@mkdir -p $(BUILD)/
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDFLAGS_$(BACKEND))
 
+TESTDRIVER: $(BUILD)/testdriver
+$(BUILD)/testdriver: $(OBJS) $(OBJS_$(BACKEND)) $(BUILD)/testdriver.o
+	$(CC) -o $@ $^  $(LDFLAGS) $(LDFLAGS_$(BACKEND)) -lz -ljson-c
+
+$(BUILD)/%.o: tests/%.c
+	@mkdir -p $(dir $@)
+	$(CC)  $(CFLAGS) $(CFLAGS_$(BACKEND)) -c -o $@ $<
+
 $(BUILD)/%.o: src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(CFLAGS_$(BACKEND)) -c -o $@ $<
+
 

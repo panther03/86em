@@ -38,8 +38,6 @@ typedef struct {
     uint8_t is_16;
 } last_op_t;
 
-// TODO separate out into CPU and VM structs, 
-// but dont want to add another indirection so idk
 typedef struct {
     x86_reg_t a;
     x86_reg_t b;
@@ -56,34 +54,45 @@ typedef struct {
     uint16_t ip;
     // TODO change this to a union type
     x86_flags_t flags;
-    int32_t bkpt;
-    bool bkpt_clear;
-    uint64_t cycles;
     int int_src;
     // TODO remove this Shit
     int seg_override;
-    int seg_override_clear;
-} vm_state_t;
+} x86_cpu_t; 
 
-vm_state_t* vm_init();
 
-void vm_run(vm_state_t* state, int max_cycles);
+// TODO separate out into CPU and VM structs, 
+// but dont want to add another indirection so idk
+typedef struct {
+    x86_cpu_t cpu;
+    struct {
+        bool enable_trace;
+    } opts;
+    struct {
+        uint64_t cycles;
+        int32_t bkpt;
+        bool bkpt_clear;
+    };
+} vm_t;
 
-#define LOAD_IP_BYTE (load_u8(SEGMENT(state->cs, (state->ip++))))
-static inline uint16_t LOAD_IP_WORD(vm_state_t* state) {
-    uint16_t val = load_u16(SEGMENT(state->cs, (state->ip)));
-    state->ip += 2;
+vm_t* vm_init();
+
+void vm_run(vm_t* state, int max_cycles);
+
+#define LOAD_IP_BYTE(cpu) (load_u8(SEGMENT(cpu->cs, (cpu->ip++))))
+static inline uint16_t LOAD_IP_WORD(x86_cpu_t* cpu) {
+    uint16_t val = load_u16(SEGMENT(cpu->cs, (cpu->ip)));
+    cpu->ip += 2;
     return val;
 }
 
-static inline void push_u16(vm_state_t *state, uint16_t val) {
-    state->sp -= 2;
-    store_u16(SEGMENT(state->ss, state->sp), val);
+static inline void push_u16(x86_cpu_t *cpu, uint16_t val) {
+    cpu->sp -= 2;
+    store_u16(SEGMENT(cpu->ss, cpu->sp), val);
 }
 
-static inline uint16_t pop_u16(vm_state_t *state) {
-    uint32_t res = load_u16(SEGMENT(state->ss, state->sp));
-    state->sp += 2;
+static inline uint16_t pop_u16(x86_cpu_t *cpu) {
+    uint32_t res = load_u16(SEGMENT(cpu->ss, cpu->sp));
+    cpu->sp += 2;
     return res;
 }
 
