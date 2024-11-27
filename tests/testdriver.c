@@ -31,6 +31,8 @@ typedef int (*testsuite_run_fn_t)(struct json_object *);
 vm_t *vm = NULL;
 int stopearly = 0;
 int testcaselimit = -1;
+int testcaseind = 0;
+int filter = 0;
 size_t json_total_read = 0;
 
 // Constants
@@ -80,7 +82,7 @@ static inline const array_list* json_get_array(const struct json_object *testcas
 
 int run_testcase(struct json_object *testcase) {
     const char *name = json_get_string(testcase, "name");
-    printf("%s: ", name);
+    if (!filter) printf("%s: ", name);
 
     const struct json_object *initial = json_object_object_get(testcase, "initial");
     TESTCASE_ASSERT(initial != NULL);
@@ -142,8 +144,15 @@ int run_testcase(struct json_object *testcase) {
 
     
     if (ret) {
-        printf("\n  ... "FAIL_RED"\n");
-    } else {
+        printf("\n  ... "FAIL_RED" (bytes:");
+        const array_list *bytes = json_get_array(testcase, "bytes");
+        for (size_t i = 0; i < bytes->length; i++) {
+            const struct json_object *byte_obj = (struct json_object*)bytes->array[i];
+            const uint8_t byte = json_object_get_int(byte_obj);
+            printf(" %02x", byte);
+        }
+        printf(")\n");
+    } else if (!filter) {
         printf(PASS_GRN"\n");
     }
 
@@ -158,18 +167,25 @@ int run_testsuite(struct json_object *obj) {
         fprintf(stderr, "Testsuite format error\n");
         return TESTSUITE_PARSE_FAIL;
     }
-    size_t limit = (testcaselimit > 0 && (size_t)testcaselimit < testcases->length) ? ((size_t)testcaselimit) : testcases->length;
+    if (testcaseind >= testcases->length) {
+        fprintf(stderr, "Testcase index out of bounds: %d\n", testcaseind);
+        return TESTSUITE_FAIL;
+    }
+    int testcaselimit_adj = testcaselimit + testcaseind;
+    size_t limit = (testcaselimit > 0 && (size_t)testcaselimit_adj < testcases->length) ? ((size_t)testcaselimit_adj) : testcases->length;
     int f_ret = TESTSUITE_PASS;
     int pass_count = 0;
-    for (size_t i = 0; i < limit; i++) {
+    for (size_t i = testcaseind; i < limit; i++) {
+        if (!filter) printf("[%ld] ", i);
         int t_ret = run_testcase((json_object *)testcases->array[i]);
         if (t_ret != 0) {
             f_ret = TESTSUITE_FAIL;
+            if (filter) printf("[%ld]", i);
             if (stopearly) return f_ret;
         }
         pass_count += (1 + t_ret);
     }
-    printf("%d/%ld passed \n", pass_count, limit);
+    printf("%d/%ld passed \n", pass_count, limit-testcaseind);
     return f_ret;
 }
 
@@ -292,11 +308,22 @@ CLEANUP:
 int main(int argc, char **argv) {
     opterr = 0;
     int c;
+    int vmdbg = 0;
 
-    while ((c = getopt(argc, argv, "sl:")) != -1) {
+    while ((c = getopt(argc, argv, "fsdl:i:")) != -1) {
         switch (c) {
         case 's':
             stopearly = 1;
+            break;
+        case 'f':
+            filter = 1;
+            break;
+        case 'i':
+            testcaseind = atoi(optarg);
+            if (testcaseind <= 0) {
+                fprintf(stderr, "Invalid index provided: %d\n", testcaseind);
+                return -1;
+            }
             break;
         case 'l':
             testcaselimit = atoi(optarg);
@@ -304,6 +331,9 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Invalid limit provided: %d\n", testcaselimit);
                 return -1;
             }
+            break;
+        case 'd':
+            vmdbg = 1;
             break;
         default: {
             fprintf(stderr, "Unexpected option %c\n", c);
@@ -320,6 +350,10 @@ int main(int argc, char **argv) {
     vm = vm_init();
     init_mem_blank();
     init_reg_lut();
+
+    if (vmdbg) {
+        vm->opts.enable_trace = true;
+    }
 
     /* allocate JSON tokenizer */
     json_tokener *tok = json_tokener_new_ex(JSON_TOKENER_DEFAULT_DEPTH);

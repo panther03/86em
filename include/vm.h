@@ -80,20 +80,31 @@ void vm_run(vm_t* state, int max_cycles);
 
 #define LOAD_IP_BYTE(cpu) (load_u8(SEGMENT(cpu->cs, (cpu->ip++))))
 static inline uint16_t LOAD_IP_WORD(x86_cpu_t* cpu) {
-    uint16_t val = load_u16(SEGMENT(cpu->cs, (cpu->ip)));
-    cpu->ip += 2;
-    return val;
+    uint8_t b1 = LOAD_IP_BYTE(cpu);
+    uint8_t b2 = LOAD_IP_BYTE(cpu);
+    return (b2 << 8) + b1;
+}
+
+static inline void push_u8(x86_cpu_t *cpu, uint8_t val) {
+    cpu->sp -= 1;
+    store_u8(SEGMENT(cpu->ss, cpu->sp), val);
 }
 
 static inline void push_u16(x86_cpu_t *cpu, uint16_t val) {
-    cpu->sp -= 2;
-    store_u16(SEGMENT(cpu->ss, cpu->sp), val);
+    push_u8(cpu, val >> 8);
+    push_u8(cpu, val & 0xFF);
+}
+
+static inline uint8_t pop_u8(x86_cpu_t *cpu) {
+    uint8_t res = load_u8(SEGMENT(cpu->ss, cpu->sp));
+    cpu->sp += 1;
+    return res;
 }
 
 static inline uint16_t pop_u16(x86_cpu_t *cpu) {
-    uint32_t res = load_u16(SEGMENT(cpu->ss, cpu->sp));
-    cpu->sp += 2;
-    return res;
+    uint8_t b1 = pop_u8(cpu);
+    uint8_t b2 = pop_u8(cpu);
+    return (b2 << 8) + b1;
 }
 
 #endif // vm_MAIN_H

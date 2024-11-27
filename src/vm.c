@@ -258,8 +258,10 @@ uint16_t read_seg(x86_cpu_t *cpu, uint8_t sr) {
         return cpu->ss;
     case 0b11:
         return cpu->ds;
-    default:
+    default: {
+        printf("the FUCK : %d\n", sr);
         return 0;
+    }
     }
 }
 
@@ -301,7 +303,7 @@ uint32_t get_16b_mem_base(x86_cpu_t *cpu, mod_reg_rm_t mod_reg_rm) {
                     cpu->seg_override = -2;
                 return cpu->bp;
             } else {
-                return LOAD_IP_WORD(cpu);
+                return 0;
             }
         }
     }
@@ -318,9 +320,12 @@ static inline uint16_t x86_get_data_segment(x86_cpu_t *cpu) {
 static inline mod_reg_rm_t read_mod_reg_rm(x86_cpu_t *cpu) {
     mod_reg_rm_t mod_reg_rm;
     mod_reg_rm.rm_byte = LOAD_IP_BYTE(cpu);
+    //printf("mod %d (%d)\n", mod_reg_rm.mod, mod_reg_rm.rm_byte);
     if (mod_reg_rm.mod == 0b01) {
         mod_reg_rm.disp = SEXT_8_16(LOAD_IP_BYTE(cpu));
     } else if (mod_reg_rm.mod == 0b10) {
+        mod_reg_rm.disp = LOAD_IP_WORD(cpu);
+    } else if (mod_reg_rm.mod == 0b00 && mod_reg_rm.rm == 0b110) {
         mod_reg_rm.disp = LOAD_IP_WORD(cpu);
     } else {
         mod_reg_rm.disp = 0;
@@ -333,7 +338,9 @@ static inline uint32_t mod_rm_effective_addr(x86_cpu_t *cpu,
     uint32_t base = mod_reg_rm.disp + get_16b_mem_base(cpu, mod_reg_rm);
     base = base & 0xFFFF;
     assert(-2 <= cpu->seg_override && cpu->seg_override <= 3);
-    return SEGMENT(x86_get_data_segment(cpu), base);
+    uint32_t addr = SEGMENT(x86_get_data_segment(cpu), base);
+    printf("mod rm addr: %08x\n", addr);
+    return addr;
 }
 
 uint32_t read_mod_rm(x86_cpu_t *cpu, mod_reg_rm_t mod_reg_rm,
@@ -344,7 +351,8 @@ uint32_t read_mod_rm(x86_cpu_t *cpu, mod_reg_rm_t mod_reg_rm,
         // register only
         return reg;
     } else {
-        return load_u16(mod_rm_effective_addr(cpu, mod_reg_rm));
+        uint32_t addr = mod_rm_effective_addr(cpu, mod_reg_rm);
+        return is_16 ? load_u16(addr) : load_u8(addr);
     }
 }
 
@@ -358,7 +366,12 @@ void write_mod_rm(x86_cpu_t *cpu, mod_reg_rm_t mod_reg_rm, uint32_t val,
             write_reg_u8(cpu, mod_reg_rm.rm, (uint8_t)val);
         }
     } else {
-        store_u16(mod_rm_effective_addr(cpu, mod_reg_rm), val);
+        uint32_t addr = mod_rm_effective_addr(cpu, mod_reg_rm);
+        if (is_16) {
+            store_u16(addr, val);
+        } else {
+            store_u8(addr, val);
+        }        
     }
 }
 
@@ -389,13 +402,14 @@ uint32_t x86_sub(x86_cpu_t *cpu, uint32_t op1, uint32_t op2, uint32_t carry,
                  uint8_t is_16) {
     uint32_t op_size = is_16 ? 16 : 8;
     uint32_t mask = (1 << (op_size)) - 1;
+    cpu->flags.c_f = (op1 & mask) < ((op2 & mask) + carry);
+    cpu->flags.a_f = (op1 & 0xF) < ((op2 & 0xF) + carry);
+    uint32_t op2_start = op2;
     op2 = ((op2 ^ mask) + 1) & mask;
     uint32_t res = op1 + op2 - carry;
     uint32_t top_bit = 1 << (op_size - 1);
-    cpu->flags.c_f = (res >> op_size);
     cpu->flags.s_f = (res >> (op_size - 1));
-    cpu->flags.o_f = ((~(op1 ^ op2) & (op1 ^ res)) & top_bit) ? 1 : 0;
-    cpu->flags.a_f = ((op1 & 0xF) + (op2 & 0xF) - carry) & 0x10 ? 1 : 0;
+    cpu->flags.o_f =  (((op1 ^ op2_start) & ~(op2_start ^ res)) & top_bit) ? 1 : 0;
     res = res & mask;
     cpu->flags.p_f = parity_byte(res);
     cpu->flags.z_f = res == 0;
@@ -860,11 +874,12 @@ void vm_run(vm_t *vm, int max_cycles) {
         }
 
         if (vm->opts.enable_trace) {
-            printf("Op: %02x; Pfx: %02x; Mode: %d\n", opc, pfx, mode);
+            printf("Op: %02x; Pfx: %02x; SegOvr: %d; Mode: %d\n", opc, pfx, cpu->seg_override, mode);
         }
 
         switch (insn_mode(opc)) {
         case 1: {
+            
             mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
             uint8_t s = opc & 0x1;
             uint8_t d = opc & 0x2;
@@ -920,13 +935,17 @@ void vm_run(vm_t *vm, int max_cycles) {
         }
         case 3: {
             uint8_t reg = opc & 0x7;
-            uint32_t res = read_reg_u16(cpu, reg) + 1;
+            uint8_t carry_save = cpu->flags.c_f;
+            uint32_t res = x86_add(cpu, read_reg_u16(cpu, reg), 1, 0, 1);
+            cpu->flags.c_f = carry_save;
             write_reg_u16(cpu, reg, res);
             break;
         }
         case 4: {
             uint8_t reg = opc & 0x7;
-            uint32_t res = read_reg_u16(cpu, reg) - 1;
+            uint8_t carry_save = cpu->flags.c_f;
+            uint32_t res = x86_sub(cpu, read_reg_u16(cpu, reg), 1, 0, 1);
+            cpu->flags.c_f = carry_save;
             write_reg_u16(cpu, reg, res);
             break;
         }
@@ -1091,21 +1110,21 @@ void vm_run(vm_t *vm, int max_cycles) {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
                 uint32_t op1 = read_reg_u8(cpu, mod_reg_rm.reg);
                 uint32_t op2 = read_mod_rm(cpu, mod_reg_rm, 0);
-                write_reg_u8(cpu, mod_reg_rm.reg, op2);
                 write_mod_rm(cpu, mod_reg_rm, op1, 0);
+                write_reg_u8(cpu, mod_reg_rm.reg, op2);
                 break;
             }
             case 0x87: {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
                 uint32_t op1 = read_reg_u16(cpu, mod_reg_rm.reg);
                 uint32_t op2 = read_mod_rm(cpu, mod_reg_rm, 1);
-                write_reg_u16(cpu, mod_reg_rm.reg, op2);
                 write_mod_rm(cpu, mod_reg_rm, op1, 1);
+                write_reg_u16(cpu, mod_reg_rm.reg, op2);
                 break;
             }
             case 0x8C: {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
-                uint16_t val = read_seg(cpu, mod_reg_rm.reg);
+                uint16_t val = read_seg(cpu, mod_reg_rm.reg & 0b11);
                 write_mod_rm(cpu, mod_reg_rm, val, 1);
                 break;
             }
@@ -1114,14 +1133,14 @@ void vm_run(vm_t *vm, int max_cycles) {
                 // TODO: i guess this should be the case?
                 // no point in doing effective address of a register
                 assert(mod_reg_rm.mod != 0b11);
-                uint32_t base = mod_rm_effective_addr(cpu, mod_reg_rm);
-                write_reg_u16(cpu, mod_reg_rm.reg, base);
+                uint32_t base = mod_reg_rm.disp + get_16b_mem_base(cpu, mod_reg_rm);
+                write_reg_u16(cpu, mod_reg_rm.reg, base & 0xFFFF);
                 break;
             }
             case 0x8E: {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
                 uint32_t op = read_mod_rm(cpu, mod_reg_rm, 1);
-                write_seg(cpu, mod_reg_rm.reg, op);
+                write_seg(cpu, mod_reg_rm.reg & 0b11, op);
                 break;
             }
             case 0x8F: {
@@ -1160,6 +1179,10 @@ void vm_run(vm_t *vm, int max_cycles) {
                 flags_union flags;
                 flags.num = pop_u16(cpu);
                 cpu->flags = flags.fl;
+                cpu->flags.res0 = 1;
+                cpu->flags.res1 = 0;
+                cpu->flags.res2 = 0;
+                cpu->flags.res3 = 0xF;
                 break;
             }
             case 0x9E: {
@@ -1179,7 +1202,7 @@ void vm_run(vm_t *vm, int max_cycles) {
                 break;
             }
             case 0xA0: {
-                uint32_t offset = LOAD_IP_BYTE(cpu);
+                uint32_t offset = LOAD_IP_WORD(cpu);
                 uint32_t addr = SEGMENT(x86_get_data_segment(cpu), offset);
                 cpu->a.b.l = load_u8(addr);
                 break;
@@ -1191,7 +1214,7 @@ void vm_run(vm_t *vm, int max_cycles) {
                 break;
             }
             case 0xA2: {
-                uint32_t offset = LOAD_IP_BYTE(cpu);
+                uint32_t offset = LOAD_IP_WORD(cpu);
                 uint32_t addr = SEGMENT(x86_get_data_segment(cpu), offset);
                 store_u8(addr, cpu->a.b.l);
                 break;
@@ -1428,24 +1451,36 @@ void vm_run(vm_t *vm, int max_cycles) {
             case 0xFE: {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
                 uint32_t op1 = read_mod_rm(cpu, mod_reg_rm, 0);
-                op1 = op1 + mod_reg_rm.reg ? -1 : 1;
+                uint8_t carry_save = cpu->flags.c_f;
+                if (mod_reg_rm.reg) {
+                    op1 = x86_sub(cpu, op1, 1, 0, 0);
+                } else {
+                    op1 = x86_add(cpu, op1, 1, 0, 0);
+                }
+                
+                cpu->flags.c_f = carry_save;
                 write_mod_rm(cpu, mod_reg_rm, op1, 0);
                 break;
             }
             case 0xFF: {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
                 uint32_t op1 = read_mod_rm(cpu, mod_reg_rm, 1);
+                uint8_t carry_save = cpu->flags.c_f;
 
                 switch (mod_reg_rm.reg) {
                 // TODO: why does the manual say mem16 specifically but not
                 // reg16/mem16? INC
                 case 0b000: {
-                    write_mod_rm(cpu, mod_reg_rm, op1 + 1, 1);
+                    uint32_t res = x86_add(cpu, op1, 1, 0, 1);
+                    cpu->flags.c_f = carry_save;
+                    write_mod_rm(cpu, mod_reg_rm, res, 1);
                     break;
                 }
                 // DEC
                 case 0b001: {
-                    write_mod_rm(cpu, mod_reg_rm, op1 - 1, 1);
+                    uint32_t res = x86_sub(cpu, op1, 1, 0, 1);
+                    cpu->flags.c_f = carry_save;
+                    write_mod_rm(cpu, mod_reg_rm, res, 1);
                     break;
                 }
                 // Near call absolute

@@ -21,6 +21,7 @@ static inline uint8_t load_u8(int addr) {
     return mem[addr];
 }
 
+// todo: this is not actually how it works on x86..
 static inline uint16_t load_u16(int addr) {
     return (mem[addr+1] << 8) + (mem[addr]);
 }
