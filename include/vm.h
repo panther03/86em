@@ -74,6 +74,12 @@ typedef struct {
     };
 } vm_t;
 
+typedef union {
+    x86_flags_t fl;
+    uint16_t num;
+} flags_union;
+
+
 vm_t* vm_init();
 
 void vm_run(vm_t* state, int max_cycles);
@@ -105,6 +111,16 @@ static inline uint16_t pop_u16(x86_cpu_t *cpu) {
     uint8_t b1 = pop_u8(cpu);
     uint8_t b2 = pop_u8(cpu);
     return (b2 << 8) + b1;
+}
+
+static inline void pop_flags(x86_cpu_t *cpu) {
+    flags_union flags;
+    flags.num = pop_u16(cpu);
+    cpu->flags = flags.fl;
+    cpu->flags.res0 = 1;
+    cpu->flags.res1 = 0;
+    cpu->flags.res2 = 0;
+    cpu->flags.res3 = 0xF;
 }
 
 #endif // vm_MAIN_H

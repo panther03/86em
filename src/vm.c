@@ -25,11 +25,6 @@ typedef struct {
     uint16_t disp;
 } mod_reg_rm_t;
 
-typedef union {
-    x86_flags_t fl;
-    uint16_t num;
-} flags_union;
-
 vm_t *vm_init() {
     vm_t *vm = (vm_t *)calloc(1, sizeof(vm_t));
     vm->cpu.cs = 0xFFFF;
@@ -339,7 +334,7 @@ static inline uint32_t mod_rm_effective_addr(x86_cpu_t *cpu,
     base = base & 0xFFFF;
     assert(-2 <= cpu->seg_override && cpu->seg_override <= 3);
     uint32_t addr = SEGMENT(x86_get_data_segment(cpu), base);
-    printf("mod rm addr: %08x\n", addr);
+    //printf("mod rm addr: %08x\n", addr);
     return addr;
 }
 
@@ -632,7 +627,7 @@ static inline void x86_string_insn(x86_cpu_t *cpu, uint8_t opc) {
     }
     // STOS (16-bit)
     case 0xAB: {
-        store_u8(dest_addr, cpu->a.x);
+        store_u16(dest_addr, cpu->a.x);
         si_ofs = 2;
         di_ofs = 2;
         break;
@@ -658,12 +653,13 @@ static inline void x86_string_insn(x86_cpu_t *cpu, uint8_t opc) {
     }
     // SCAS (16-bit)
     case 0xAF: {
-        x86_sub(cpu, cpu->a.x, load_u8(dest_addr), 0, sz);
+        x86_sub(cpu, cpu->a.x, load_u16(dest_addr), 0, sz);
         si_ofs = 2;
         di_ofs = 2;
         break;
     }
     }
+    //printf("%d %d\n", si_ofs, di_ofs);
     if (cpu->flags.d_f) {
         cpu->si -= si_ofs;
         cpu->di -= di_ofs;
@@ -679,6 +675,7 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
 
     switch (mod_reg_rm.reg) {
     // TEST
+    case 0b001:
     case 0b000: {
         uint32_t imm = is_16 ? LOAD_IP_WORD(cpu) : LOAD_IP_BYTE(cpu);
         x86_and(cpu, op1, imm, is_16);
@@ -702,11 +699,15 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
             uint32_t prod = cpu->a.x * op1;
             cpu->a.x = prod;
             cpu->d.x = prod >> 16;
-            cpu->flags.o_f = cpu->flags.c_f = (cpu->a.x != 0);
+            cpu->flags.o_f = cpu->flags.c_f = (cpu->d.x != 0);
+            cpu->flags.s_f = (cpu->a.x >> 15);
         } else {
             cpu->a.x = cpu->a.b.l * op1;
             cpu->flags.o_f = cpu->flags.c_f = (cpu->a.b.h != 0);
+            cpu->flags.s_f = (cpu->a.x >> 8);
         }
+        cpu->flags.p_f = parity_byte(cpu->a.x);
+        cpu->flags.z_f = cpu->a.x == 0;
         break;
     }
     // IMUL
@@ -717,10 +718,14 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
             cpu->a.x = prod;
             cpu->d.x = prod >> 16;
             cpu->flags.o_f = cpu->flags.c_f = (cpu->a.x != prod);
+            cpu->flags.s_f = (cpu->a.x >> 15);
         } else {
             cpu->a.x = SEXT_8_16(cpu->a.b.l) * SEXT_8_16(op1);
             cpu->flags.o_f = cpu->flags.c_f = (cpu->a.b.l == cpu->a.x);
+            cpu->flags.s_f = (cpu->a.x >> 8);
         }
+        cpu->flags.p_f = parity_byte(cpu->a.x);
+        cpu->flags.z_f = cpu->a.x == 0;
         break;
     }
     // DIV/IDIV
@@ -737,6 +742,7 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
         break;
     }
     }
+    
 }
 
 // TODO: make this into a table
@@ -1054,7 +1060,7 @@ void vm_run(vm_t *vm, int max_cycles) {
         case 13: {
             // String instruction
             bool compare_enable = ((opc & 0x06) == 0x6);
-            uint16_t counter = pfx ? 1 : cpu->c.x;
+            uint16_t counter = pfx ? cpu->c.x : 1;
             while (counter != 0) {
                 x86_string_insn(cpu, opc);
                 counter--;
@@ -1176,13 +1182,7 @@ void vm_run(vm_t *vm, int max_cycles) {
                 break;
             }
             case 0x9D: {
-                flags_union flags;
-                flags.num = pop_u16(cpu);
-                cpu->flags = flags.fl;
-                cpu->flags.res0 = 1;
-                cpu->flags.res1 = 0;
-                cpu->flags.res2 = 0;
-                cpu->flags.res3 = 0xF;
+                pop_flags(cpu);
                 break;
             }
             case 0x9E: {
@@ -1232,7 +1232,7 @@ void vm_run(vm_t *vm, int max_cycles) {
             }
             case 0xA9: {
                 uint32_t imm = LOAD_IP_WORD(cpu);
-                x86_and(cpu, cpu->a.b.l, imm, 1);
+                x86_and(cpu, cpu->a.x, imm, 1);
                 break;
             }
             case 0xC2: {
@@ -1250,12 +1250,12 @@ void vm_run(vm_t *vm, int max_cycles) {
             // LDS
             case 0xC5: {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
-                uint32_t op1 = read_mod_rm(cpu, mod_reg_rm, 1);
+                uint32_t op1 = mod_rm_effective_addr(cpu, mod_reg_rm);
                 write_reg_u16(cpu, mod_reg_rm.reg, load_u16(op1));
                 if (opc & 1) {
-                    cpu->ds = load_u16(op1 + 2);
+                    cpu->ds = load_u16(op1+2);
                 } else {
-                    cpu->es = load_u16(op1 + 2);
+                    cpu->es = load_u16(op1+2);
                 }
                 break;
             }
@@ -1268,15 +1268,15 @@ void vm_run(vm_t *vm, int max_cycles) {
                 break;
             }
             case 0xCA: {
-                cpu->ip = pop_u16(cpu);
-                cpu->cs = pop_u16(cpu);
-                break;
-            }
-            case 0xCB: {
                 uint32_t imm = LOAD_IP_WORD(cpu);
                 cpu->ip = pop_u16(cpu);
                 cpu->cs = pop_u16(cpu);
                 cpu->sp += imm;
+                break;
+            }
+            case 0xCB: {
+                cpu->ip = pop_u16(cpu);
+                cpu->cs = pop_u16(cpu);
                 break;
             }
             case 0xCC: {
@@ -1300,16 +1300,14 @@ void vm_run(vm_t *vm, int max_cycles) {
             case 0xCF: {
                 cpu->ip = pop_u16(cpu);
                 cpu->cs = pop_u16(cpu);
-                flags_union flags;
-                flags.num = pop_u16(cpu);
-                cpu->flags = flags.fl;
+                pop_flags(cpu);
                 break;
             }
             // XLATB
             case 0xD7: {
+                    uint32_t addr = SEGMENT(x86_get_data_segment(cpu), ((cpu->b.x + cpu->a.b.l) & 0xFFFF));
                 cpu->a.b.l =
-                    load_u8(SEGMENT(x86_get_data_segment(cpu), cpu->b.x) +
-                            cpu->a.b.l);
+                    load_u8(addr);
                 break;
             }
             // LOOPNZ

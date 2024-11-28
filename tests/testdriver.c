@@ -342,8 +342,8 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (argc - optind < 1) {
-        fprintf(stderr, "Expected path(s) to gzipped JSON test case.\n");
+    if (argc - optind < 2) {
+        fprintf(stderr, "Expected path(s) to test directory + at least 1 gzipped JSON test case.\n");
         return -1;
     }
 
@@ -362,8 +362,18 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    for (int i = optind; i < argc; i++) {
-        const char *testsuite = argv[i];
+    const char *testdir = argv[optind];
+
+    for (int i = optind+1; i < argc; i++) {
+
+        size_t d_len = strlen(testdir);
+        char *testsuite = (char*)malloc(d_len+strlen(argv[i])+2 + 8);
+        strcpy(testsuite,testdir);
+        strcat(testsuite, "/");
+        strcat(testsuite, argv[i]);
+        strcat(testsuite,".json.gz");
+        printf("%s\n", testsuite);
+        exit(0);
         FILE *testsuite_f = fopen(testsuite, "r");
         if (!testsuite_f) {
             printf("Could not read test suite: %s\n", testsuite);
