@@ -14,21 +14,27 @@ typedef union {
     } __attribute__((packed)) b;
 } x86_reg_t;
 
-typedef struct {
-    uint8_t c_f   : 1;
-    uint8_t res0 : 1;
-    uint8_t p_f  : 1;
-    uint8_t res1 : 1;
-    uint8_t a_f  : 1;
-    uint8_t res2 : 1;
-    uint8_t z_f  : 1;
-    uint8_t s_f  : 1;
-    uint8_t t_f  : 1;
-    uint8_t i_f  : 1;
-    uint8_t d_f  : 1;
-    uint8_t o_f  : 1;
-    uint8_t res3 : 4;
+typedef union {
+    struct {
+        uint8_t c_f   : 1;
+        uint8_t res0 : 1;
+        uint8_t p_f  : 1;
+        uint8_t res1 : 1;
+        uint8_t a_f  : 1;
+        uint8_t res2 : 1;
+        uint8_t z_f  : 1;
+        uint8_t s_f  : 1;
+        uint8_t t_f  : 1;
+        uint8_t i_f  : 1;
+        uint8_t d_f  : 1;
+        uint8_t o_f  : 1;
+        uint8_t res3 : 4;
+    };
+    uint16_t num;
 } __attribute__((packed)) x86_flags_t;
+
+#define FLAGS_RESERVED_MASK 0xF02A
+#define FLAGS_DEFAULT       0xF002
 
 typedef struct {
     uint32_t op1;
@@ -114,13 +120,8 @@ static inline uint16_t pop_u16(x86_cpu_t *cpu) {
 }
 
 static inline void pop_flags(x86_cpu_t *cpu) {
-    flags_union flags;
-    flags.num = pop_u16(cpu);
-    cpu->flags = flags.fl;
-    cpu->flags.res0 = 1;
-    cpu->flags.res1 = 0;
-    cpu->flags.res2 = 0;
-    cpu->flags.res3 = 0xF;
+    uint16_t fl = pop_u16(cpu);
+    cpu->flags.num = FLAGS_DEFAULT | (fl & ~FLAGS_RESERVED_MASK);
 }
 
 #endif // vm_MAIN_H

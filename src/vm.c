@@ -117,17 +117,17 @@ void dump_cpu(x86_cpu_t *cpu, x86_cpu_t *old_cpu) {
     printf("BP %04x\t", cpu->bp);
     HIGHLIGHT_END
     HIGHLIGHT(cpu->sp, old_cpu->sp)
-    printf("SP %04x\n", cpu->sp);
+    printf("SP %04x\t", cpu->sp);
     HIGHLIGHT_END
 
-    flags_union flags_u;
-    flags_u.fl = cpu->flags;
 #ifdef CFG_DIFF_TRACE
-    flags_union old_flags_u;
-    old_flags_u.fl = old_cpu->flags;
-    dump_flags(flags_u.num, old_flags_u.num);
+    HIGHLIGHT(cpu->flags.num, old_cpu->flags.num)
+    printf("FL %04x\n", cpu->flags.num);
+    HIGHLIGHT_END
+    dump_flags(cpu->flags.num, old_cpu->flags.num);
 #else
-    dump_flags(flags_u.num, flags_u.num);
+    printf("FL %04x\n", cpu->flags.num);
+    dump_flags(cpu->flags.num, cpu->flags.num);
 #endif
     printf("========================================\n");
 }
@@ -379,6 +379,7 @@ static inline uint8_t parity_byte(uint8_t op) {
 
 uint32_t x86_add(x86_cpu_t *cpu, uint32_t op1, uint32_t op2, uint32_t carry,
                  uint8_t is_16) {
+    printf("%08x %08x %08x\n", op1, op2, carry);
     uint32_t res = op1 + op2 + carry;
     uint32_t op_size = is_16 ? 16 : 8;
     uint32_t top_bit = 1 << (op_size - 1);
@@ -717,11 +718,14 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
             int32_t prod = ax_s * SEXT_16_32(op1);
             cpu->a.x = prod;
             cpu->d.x = prod >> 16;
-            cpu->flags.o_f = cpu->flags.c_f = (cpu->a.x != prod);
+            ax_s = SEXT_16_32(cpu->a.x);
+            cpu->flags.o_f = cpu->flags.c_f = (ax_s != prod);
             cpu->flags.s_f = (cpu->a.x >> 15);
         } else {
             cpu->a.x = SEXT_8_16(cpu->a.b.l) * SEXT_8_16(op1);
-            cpu->flags.o_f = cpu->flags.c_f = (cpu->a.b.l == cpu->a.x);
+            int16_t al_sext =  SEXT_8_16(cpu->a.b.l);
+            int16_t ax = cpu->a.x;
+            cpu->flags.o_f = cpu->flags.c_f = (al_sext != ax);
             cpu->flags.s_f = (cpu->a.x >> 8);
         }
         cpu->flags.p_f = parity_byte(cpu->a.x);
@@ -731,15 +735,55 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
     // DIV/IDIV
     case 0b110:
     case 0b111: {
-        // TODO divide exceptions
-        uint32_t divisor =
-            (mod_reg_rm.reg & 1) ? (SEXT_16_32(op1)) : (int32_t)op1;
-        uint32_t dividend = (cpu->d.x << 16) + cpu->a.x;
-        uint32_t remainder = dividend % divisor;
-        dividend /= divisor;
-        cpu->a.x = dividend;
-        cpu->d.x = remainder;
+        if (is_16) {
+            // TODO divide exceptions
+            uint32_t divisor =
+                (mod_reg_rm.reg & 1) ? (SEXT_16_32(op1)) : (int32_t)op1;
+            if (divisor == 0) {
+                printf("DivideByZero\n");
+                break;
+            }
+            uint32_t dividend = (cpu->d.x << 16) + cpu->a.x;
+            uint32_t remainder = dividend % divisor;
+            dividend /= divisor;
+            cpu->a.x = dividend;
+            cpu->d.x = remainder;
+            break;
+        } else {
+            uint16_t divisor = 
+                (mod_reg_rm.reg & 1) ? (SEXT_8_16(op1)) : (int16_t) op1;
+            if (divisor == 0) goto DIVEXC;
+
+            uint16_t dividend = cpu->a.x;            
+            int16_t remainder;
+            int16_t quotient;
+            if (mod_reg_rm.reg & 1) {
+                remainder = (int16_t)dividend % (int16_t)divisor;
+                quotient = (int16_t)dividend / (int16_t)divisor;
+                int16_t res_sign = (dividend ^ divisor) & 0x8000;
+                
+                if ((res_sign && quotient > 0x7F)
+                    || (!res_sign && ((quotient < 0x80) || (quotient > 0xFF))))
+                    goto DIVEXC;
+            } else {
+                remainder = dividend % divisor;
+                quotient = dividend / divisor;
+                if (quotient > 0xFF) goto DIVEXC;
+            }
+            cpu->a.b.l = quotient;
+            cpu->a.b.h = remainder;
+        }
         break;
+DIVEXC:
+        // even though these flags are UB, the testcases store them to RAM
+        // because of the exception so we can't mask them
+        // 8086 seems to clear the undefined flags
+        cpu->flags.num = cpu->flags.num & 0b1111011100101010;
+        cpu->flags.p_f = parity_byte(cpu->a.x);
+        cpu->flags.z_f = is_16 ? (cpu->a.x == 0) : (cpu->a.b.l == 0);
+        cpu->int_src = 0;
+        break;
+
     }
     }
     
@@ -816,7 +860,6 @@ static inline void x86_handle_interrupts(x86_cpu_t *cpu) {
     return;
 
 INTERRUPT_FOUND:;
-    flags_union flags;
     uint8_t temp_tf;
 
     // TODO?
@@ -824,10 +867,9 @@ INTERRUPT_FOUND:;
 
     do {
         // PUSH FLAGS
-        flags.fl = cpu->flags;
-        push_u16(cpu, flags.num);
+        push_u16(cpu, cpu->flags.num);
         // LET TEMP = TF
-        temp_tf = flags.fl.t_f;
+        temp_tf = cpu->flags.t_f;
         // CLEAR IF & TF
         cpu->flags.t_f = 0;
         cpu->flags.i_f = 0;
@@ -1176,9 +1218,7 @@ void vm_run(vm_t *vm, int max_cycles) {
                 break;
             }
             case 0x9C: {
-                flags_union flags;
-                flags.fl = cpu->flags;
-                push_u16(cpu, flags.num);
+                push_u16(cpu, cpu->flags.num);
                 break;
             }
             case 0x9D: {
@@ -1186,19 +1226,17 @@ void vm_run(vm_t *vm, int max_cycles) {
                 break;
             }
             case 0x9E: {
-                flags_union ah_flags;
+                x86_flags_t ah_flags;
                 ah_flags.num = cpu->a.b.h;
-                cpu->flags.s_f = ah_flags.fl.s_f;
-                cpu->flags.z_f = ah_flags.fl.z_f;
-                cpu->flags.a_f = ah_flags.fl.a_f;
-                cpu->flags.p_f = ah_flags.fl.p_f;
-                cpu->flags.c_f = ah_flags.fl.c_f;
+                cpu->flags.s_f = ah_flags.s_f;
+                cpu->flags.z_f = ah_flags.z_f;
+                cpu->flags.a_f = ah_flags.a_f;
+                cpu->flags.p_f = ah_flags.p_f;
+                cpu->flags.c_f = ah_flags.c_f;
                 break;
             }
             case 0x9F: {
-                flags_union ah_flags;
-                ah_flags.fl = cpu->flags;
-                cpu->a.b.h = (ah_flags.num) & 0xFF;
+                cpu->a.b.h = (cpu->flags.num) & 0xFF;
                 break;
             }
             case 0xA0: {
@@ -1462,7 +1500,9 @@ void vm_run(vm_t *vm, int max_cycles) {
             }
             case 0xFF: {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
+                if (mod_reg_rm.reg == 0b110) cpu->sp -= 2;
                 uint32_t op1 = read_mod_rm(cpu, mod_reg_rm, 1);
+                uint32_t addr = mod_rm_effective_addr(cpu, mod_reg_rm);
                 uint8_t carry_save = cpu->flags.c_f;
 
                 switch (mod_reg_rm.reg) {
@@ -1491,8 +1531,8 @@ void vm_run(vm_t *vm, int max_cycles) {
                 case 0b011: {
                     push_u16(cpu, cpu->cs);
                     push_u16(cpu, cpu->ip);
-                    cpu->ip = load_u16(op1);
-                    cpu->cs = load_u16(op1 + 2);
+                    cpu->ip = load_u16(addr);
+                    cpu->cs = load_u16(addr + 2);
                     break;
                 }
                 // Near jump absolute
@@ -1503,13 +1543,14 @@ void vm_run(vm_t *vm, int max_cycles) {
                 // Far jump absolute
                 // TODO idk if it works the same as the far call
                 case 0b101: {
-                    cpu->ip = load_u16(op1);
-                    cpu->cs = load_u16(op1 + 2);
+                    cpu->ip = load_u16(addr);
+                    cpu->cs = load_u16(addr + 2);
                     break;
                 }
                 // Push
                 case 0b110: {
-                    push_u16(cpu, op1);
+                    store_u8(SEGMENT(cpu->ss, cpu->sp+1), op1 >> 8);
+                    store_u8(SEGMENT(cpu->ss, cpu->sp), op1);
                     break;
                 }
                 default: {

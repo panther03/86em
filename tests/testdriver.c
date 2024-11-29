@@ -23,6 +23,9 @@
 #define FAIL_RED "\e[0;31mfail\e[0m"
 #define PASS_GRN "\e[0;32mpass\e[0m"
 
+#define METADATA_JSON "metadata.json"
+#define JSON_GZ_SUFFIX ".json.gz"
+
 typedef int (*testsuite_run_fn_t)(struct json_object *);
 
 ///////////////////
@@ -34,6 +37,9 @@ int testcaselimit = -1;
 int testcaseind = 0;
 int filter = 0;
 size_t json_total_read = 0;
+
+struct json_object* metadata_json = NULL;
+uint16_t flags_mask = 0xFFFF;
 
 // Constants
 uint8_t REG_LUT[26 * 26] = {0};
@@ -109,7 +115,6 @@ int run_testcase(struct json_object *testcase) {
     }
 
     vm_run(vm, 1);
-
     const struct json_object *final = json_object_object_get(testcase, "final");
     TESTCASE_ASSERT(final != NULL);
     regs = json_object_object_get(final, "regs");
@@ -121,9 +126,10 @@ int run_testcase(struct json_object *testcase) {
         TESTCASE_ASSERT(reg_ofs > 0);
         int expected = json_object_get_int(regs_val_obj_f);
         int actual = ((uint16_t*)&vm->cpu)[reg_ofs >> 1];
+        int mask = (reg_hash == REG_HASH("fl")) ? flags_mask : 0xFFFF;
         // TODO endianness?
-        if (expected != actual) {
-            fprintf(stdout,"\n\t%s expected %04x got %04x", regs_name_f, expected, actual);
+        if (((expected ^ actual) & mask) != 0) {
+            fprintf(stdout,"\n\t%s expected %04x got %04x", regs_name_f, expected&mask, actual&mask);
             ret = -1;
         }
     }
@@ -189,6 +195,15 @@ int run_testsuite(struct json_object *obj) {
     return f_ret;
 }
 
+int set_metadata(struct json_object *obj) {
+    // this object is never freed because it is used for the entire test runtime
+    assert(obj);
+    struct json_object* opcodes_obj = json_object_object_get(obj, "opcodes");
+    assert(opcodes_obj);
+    metadata_json = opcodes_obj;
+    return 0;
+}
+
 /*
 Parse JSON until a valid JSON object is recognized in the buffer. Data
 afterwards is therefore discarded. Return TESTSUITE_PARSE_CONTINUE if it is
@@ -196,7 +211,7 @@ expecting more data, TESTSUITE_PARSE_FAIL if the parse failed, otherwise the
 return code of the callback procedure.
 */
 int parse_json_chunk(json_tokener *tok, const char *buf, size_t bufsz,
-                     testsuite_run_fn_t callback) {
+                     testsuite_run_fn_t callback, bool free_enable) {
     json_total_read += bufsz;
     size_t start_pos = 0;
     struct json_object *obj;
@@ -218,7 +233,9 @@ int parse_json_chunk(json_tokener *tok, const char *buf, size_t bufsz,
         }
         if (obj != NULL) {
             int cb_ret = callback(obj);
-            json_object_put(obj);
+            if (free_enable) {
+                json_object_put(obj);
+            }
             assert(cb_ret < TESTSUITE_PARSE_CONTINUE);
             return cb_ret;
         }
@@ -282,7 +299,7 @@ int parse_testsuite(FILE *testsuite_f, json_tokener *tok,
                 goto CLEANUP;
             }
             have = CHUNK - strm.avail_out;
-            j_ret = parse_json_chunk(tok, (const char *)out, have, callback);
+            j_ret = parse_json_chunk(tok, (const char *)out, have, callback, true);
             if (j_ret <= 0) {
                 f_ret = j_ret;
                 goto CLEANUP;
@@ -303,6 +320,25 @@ CLEANUP:
     json_tokener_reset(tok);
 
     return f_ret;
+}
+
+int parse_metadata(FILE *metadata_f, json_tokener *tok) {
+    char buf[CHUNK];
+    size_t cnt;
+    do {
+        cnt = fread(buf, 1, CHUNK, metadata_f);
+        if (ferror(metadata_f)) {
+            fprintf(stderr, "Could not read from testsuite file\n");
+            return -1;
+        }
+
+        int ret = parse_json_chunk(tok, buf, cnt, set_metadata, false);
+        if (ret <= 0) {
+            return ret;
+        }
+    } while (cnt != 0);
+    // eof reached with no json produced
+    return -1;
 }
 
 int main(int argc, char **argv) {
@@ -363,17 +399,67 @@ int main(int argc, char **argv) {
     }
 
     const char *testdir = argv[optind];
+    size_t d_len = strlen(testdir);
+
+    char *metadata_json_path = (char*)malloc(d_len + 1 + sizeof(METADATA_JSON) + 1);
+    strcpy(metadata_json_path, testdir);
+    strcat(metadata_json_path, "/");
+    strcat(metadata_json_path, METADATA_JSON);
+    FILE* metadata_json_f = fopen(metadata_json_path, "r");
+    if (!metadata_json_f) {
+        printf("Could not read metadata JSON for test suite: %s\n", metadata_json_path);
+        exit(EXIT_FAILURE);
+    }
+    int ret = parse_metadata(metadata_json_f, tok);
+    fclose(metadata_json_f);
+    if (ret != 0 || metadata_json == NULL) {
+        printf("Failed to parse metadata JSON\n");
+        exit(EXIT_FAILURE);
+    }
 
     for (int i = optind+1; i < argc; i++) {
-
-        size_t d_len = strlen(testdir);
-        char *testsuite = (char*)malloc(d_len+strlen(argv[i])+2 + 8);
+        // Build test suite path 
+        char *testsuite = (char*)malloc(d_len + 1 + strlen(argv[i]) + sizeof(JSON_GZ_SUFFIX) + 11);
         strcpy(testsuite,testdir);
         strcat(testsuite, "/");
         strcat(testsuite, argv[i]);
-        strcat(testsuite,".json.gz");
-        printf("%s\n", testsuite);
-        exit(0);
+        strcat(testsuite, JSON_GZ_SUFFIX);
+
+        // Split arg into OPCODE.REG if applicable
+        char *opcode = argv[i];
+        char *reg = opcode;
+        while (*reg != '.' && *reg != '\0') reg++;
+        if (*reg != '\0') {
+            *(reg++) = '\0';
+        } else {
+            reg = NULL;
+        }
+        
+
+        // Lookup metadata object storing UB in metadata JSON
+        struct json_object *ub_obj = json_object_object_get(metadata_json, opcode);
+        if (!ub_obj) {
+            fprintf(stderr, "Can't find %s in metadata json\n", opcode);
+            exit(EXIT_FAILURE);
+        }
+        if (reg) {
+            ub_obj = json_object_object_get(ub_obj, "reg");
+            if (!ub_obj) {
+                fprintf(stderr, "Tried looking for register map in opcode %s, but failed\n", opcode);
+                exit(EXIT_FAILURE);
+            }
+            ub_obj = json_object_object_get(ub_obj, reg);
+            if (!ub_obj) {
+                fprintf(stderr, "Tried looking for register %s in register map, but failed\n", reg);
+                exit(EXIT_FAILURE);
+            }
+
+        }
+        const char *status = json_object_get_string(json_object_object_get(ub_obj, "status"));
+        if (strcmp(status, "alias") == 0) goto PASS;
+        ub_obj = json_object_object_get(ub_obj, "flags-mask");
+        flags_mask = ub_obj ? json_object_get_int(ub_obj) : 0xFFFF;
+
         FILE *testsuite_f = fopen(testsuite, "r");
         if (!testsuite_f) {
             printf("Could not read test suite: %s\n", testsuite);
@@ -388,6 +474,7 @@ int main(int argc, char **argv) {
                 return -1;
             }
         } else {
+PASS:
             printf("%s: "PASS_GRN"\n", testsuite);
         }
     }
