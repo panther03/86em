@@ -254,7 +254,6 @@ uint16_t read_seg(x86_cpu_t *cpu, uint8_t sr) {
     case 0b11:
         return cpu->ds;
     default: {
-        printf("the FUCK : %d\n", sr);
         return 0;
     }
     }
@@ -379,7 +378,6 @@ static inline uint8_t parity_byte(uint8_t op) {
 
 uint32_t x86_add(x86_cpu_t *cpu, uint32_t op1, uint32_t op2, uint32_t carry,
                  uint8_t is_16) {
-    printf("%08x %08x %08x\n", op1, op2, carry);
     uint32_t res = op1 + op2 + carry;
     uint32_t op_size = is_16 ? 16 : 8;
     uint32_t top_bit = 1 << (op_size - 1);
@@ -455,6 +453,7 @@ uint32_t x86_xor(x86_cpu_t *cpu, uint32_t op1, uint32_t op2, uint8_t is_16) {
 uint32_t x86_rotate(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
                     uint8_t is_16) {
     uint8_t op_size = is_16 ? 16 : 8;
+    uint32_t op_mask = (1 << op_size)-1;
     uint8_t rc_temp_shamt = shamt % (is_16 ? 17 : 9);
     uint8_t ro_temp_shamt = shamt % (is_16 ? 16 : 8);
     switch (op) {
@@ -477,7 +476,7 @@ uint32_t x86_rotate(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
         while (rc_temp_shamt != 0) {
             uint8_t temp_cf = x & 1;
             // todo op_size correct here?
-            x = (x >> 1) + (cpu->flags.c_f << op_size);
+            x = (x >> 1) + (cpu->flags.c_f << (op_size-1));
             cpu->flags.c_f = temp_cf;
             rc_temp_shamt -= 1;
         }
@@ -485,7 +484,8 @@ uint32_t x86_rotate(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
     }
     case 0b000: {
         while (ro_temp_shamt != 0) {
-            x = (x << 1) + cpu->flags.c_f;
+            uint8_t temp_cf = (x >> (op_size - 1)) & 1;
+            x = (x << 1) + temp_cf;
             ro_temp_shamt -= 1;
         }
         cpu->flags.c_f = x & 1;
@@ -497,7 +497,8 @@ uint32_t x86_rotate(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
     case 0b001: {
         while (ro_temp_shamt != 0) {
             // todo op_size correct here?
-            x = (x >> 1) + (cpu->flags.c_f << op_size);
+            uint8_t temp_cf = x & 1;
+            x = (x >> 1) + (temp_cf << (op_size-1));
             ro_temp_shamt -= 1;
         }
         cpu->flags.c_f = x >> (op_size - 1);
@@ -507,9 +508,6 @@ uint32_t x86_rotate(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
         break;
     }
     }
-    cpu->flags.p_f = parity_byte(x);
-    cpu->flags.s_f = (x >> (op_size - 1));
-    cpu->flags.z_f = x == 0;
     return x;
 }
 
@@ -517,9 +515,12 @@ uint32_t x86_rotate(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
 uint32_t x86_shift(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
                    uint8_t is_16) {
     uint8_t op_size = is_16 ? 16 : 8;
+    uint32_t op_mask = (1 << op_size)-1;
     uint32_t carry_shamt = (op_size - shamt > 0) ? op_size - shamt : 0;
 
-    printf("x: %d", x);
+    if (shamt > 0xF) {
+        printf("warning: shamt overflow detected, not handled properly\n");
+    }
     switch (op) {
     // SHL
     case 0b100: {
@@ -527,6 +528,8 @@ uint32_t x86_shift(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
         x <<= shamt;
         if (shamt == 1) {
             cpu->flags.o_f = (x >> (op_size - 1)) ^ cpu->flags.c_f;
+        } else {
+            cpu->flags.o_f = 0;
         }
         break;
     }
@@ -535,6 +538,8 @@ uint32_t x86_shift(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
         cpu->flags.c_f = (x >> (shamt - 1)) & 0x1;
         if (shamt == 1) {
             cpu->flags.o_f = (x >> (op_size - 1));
+        } else {
+            cpu->flags.o_f = 0;
         }
         x >>= shamt;
         break;
@@ -545,15 +550,16 @@ uint32_t x86_shift(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
         // convert to signed
         x = (((int32_t)x) << (32 - op_size)) >> (32 - op_size);
         x >>= shamt;
-        if (shamt == 1) {
-            cpu->flags.o_f = 0;
-        }
+        cpu->flags.o_f = 0;
         break;
     }
     }
-    cpu->flags.p_f = parity_byte(x);
-    cpu->flags.s_f = (x >> (op_size - 1));
-    cpu->flags.z_f = x == 0;
+    if (shamt) {
+        cpu->flags.p_f = parity_byte(x);
+        cpu->flags.s_f = (x >> (op_size - 1));
+        cpu->flags.z_f = ((x & op_mask) == 0);
+    }
+    //printf("%08x\n", x);
     return x;
 }
 
@@ -736,17 +742,30 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
     case 0b110:
     case 0b111: {
         if (is_16) {
-            // TODO divide exceptions
+
             uint32_t divisor =
                 (mod_reg_rm.reg & 1) ? (SEXT_16_32(op1)) : (int32_t)op1;
-            if (divisor == 0) {
-                printf("DivideByZero\n");
-                break;
-            }
+            if (divisor == 0) goto DIVEXC;
+
             uint32_t dividend = (cpu->d.x << 16) + cpu->a.x;
-            uint32_t remainder = dividend % divisor;
-            dividend /= divisor;
-            cpu->a.x = dividend;
+            printf("%08x %08x\n", dividend, divisor);
+            int32_t remainder;
+            int32_t quotient;
+            if (mod_reg_rm.reg & 1) {
+                remainder = (int32_t)dividend % (int32_t)divisor;
+                quotient = (int32_t)dividend / (int32_t)divisor;
+                int32_t res_sign = (dividend ^ divisor) & 0x80000000;
+                printf("r %08x q %08x\n", remainder, quotient);
+                
+                if ((!res_sign && (uint32_t)quotient > 0x7FFF)
+                    || ((uint32_t)quotient < 0xFFFF8000) || (remainder && ((uint32_t)quotient == 0xFFFF8000)))
+                    goto DIVEXC;
+            } else {
+                remainder = dividend % divisor;
+                quotient = dividend / divisor;
+                if (quotient > 0xFFFF) goto DIVEXC;
+            }
+            cpu->a.x = quotient;
             cpu->d.x = remainder;
             break;
         } else {
@@ -755,15 +774,17 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
             if (divisor == 0) goto DIVEXC;
 
             uint16_t dividend = cpu->a.x;            
+            printf("%04x %04x\n", dividend, divisor);
             int16_t remainder;
             int16_t quotient;
             if (mod_reg_rm.reg & 1) {
                 remainder = (int16_t)dividend % (int16_t)divisor;
                 quotient = (int16_t)dividend / (int16_t)divisor;
                 int16_t res_sign = (dividend ^ divisor) & 0x8000;
+                printf("r %04x q %04x\n", remainder, quotient);
                 
-                if ((res_sign && quotient > 0x7F)
-                    || (!res_sign && ((quotient < 0x80) || (quotient > 0xFF))))
+                if ((!res_sign && (uint16_t)quotient > 0x7F)
+                    || (res_sign && ((uint16_t)quotient < 0xFF80) || (remainder && ((uint16_t)quotient == 0xFF80))))
                     goto DIVEXC;
             } else {
                 remainder = dividend % divisor;
