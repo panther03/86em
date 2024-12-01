@@ -453,7 +453,6 @@ uint32_t x86_xor(x86_cpu_t *cpu, uint32_t op1, uint32_t op2, uint8_t is_16) {
 uint32_t x86_rotate(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
                     uint8_t is_16) {
     uint8_t op_size = is_16 ? 16 : 8;
-    uint32_t op_mask = (1 << op_size)-1;
     uint8_t rc_temp_shamt = shamt % (is_16 ? 17 : 9);
     uint8_t ro_temp_shamt = shamt % (is_16 ? 16 : 8);
     switch (op) {
@@ -524,6 +523,7 @@ uint32_t x86_shift(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
     switch (op) {
     // SHL
     case 0b100: {
+        printf("%08x %08x\n", x, shamt);
         cpu->flags.c_f = (x >> carry_shamt);
         x <<= shamt;
         if (shamt == 1) {
@@ -784,7 +784,7 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
                 printf("r %04x q %04x\n", remainder, quotient);
                 
                 if ((!res_sign && (uint16_t)quotient > 0x7F)
-                    || (res_sign && ((uint16_t)quotient < 0xFF80) || (remainder && ((uint16_t)quotient == 0xFF80))))
+                    || (res_sign && (((uint16_t)quotient < 0xFF80) || (remainder && ((uint16_t)quotient == 0xFF80)))))
                     goto DIVEXC;
             } else {
                 remainder = dividend % divisor;
@@ -881,6 +881,7 @@ static inline void x86_handle_interrupts(x86_cpu_t *cpu) {
     return;
 
 INTERRUPT_FOUND:;
+    printf("INTERRUPTED (%d)!!\n",int_src);
     uint8_t temp_tf;
 
     // TODO?
@@ -906,7 +907,7 @@ INTERRUPT_FOUND:;
 
 void vm_run(vm_t *vm, int max_cycles) {
     x86_cpu_t *cpu = &vm->cpu;
-    int prog_end = prog_info.prog_start + prog_info.prog_size;
+    //int prog_end = prog_info.prog_start + prog_info.prog_size;
     int cyc_start = vm->cycles;
 #ifdef CFG_DIFF_TRACE
     x86_cpu_t  old_cpu = *cpu;

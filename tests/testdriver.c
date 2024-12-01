@@ -173,7 +173,7 @@ int run_testsuite(struct json_object *obj) {
         fprintf(stderr, "Testsuite format error\n");
         return TESTSUITE_PARSE_FAIL;
     }
-    if (testcaseind >= testcases->length) {
+    if (testcaseind >= (int)testcases->length) {
         fprintf(stderr, "Testcase index out of bounds: %d\n", testcaseind);
         return TESTSUITE_FAIL;
     }

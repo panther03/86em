@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <assert.h>
+#include <stdio.h>
 
 i8253_state_t i8253_state;
 
@@ -86,12 +87,16 @@ void i8253_tick() {
             break;
         }
         // Mode 3
-        case 0b0111:
-        case 0b0011: {
+        case 0b1110:
+        case 0b0110: {
             if (--i8253_state.ctrs[0].x == 0xFFFF) {
                 i8253_state.ctrs[0].x = i8253_state.ctr_limits[0] - 1;
             }
             *i8253_state.out[0] = (i8253_state.ctrs[0].x >= (i8253_state.ctr_limits[0]>>1));
+            break;
+        }
+        default: {
+            printf("unrecognized timer mode %d\n", i8253_state.status);
             break;
         }
     }

@@ -31,3 +31,6 @@ if (flag) {
 }
 
 Use 1.5 ticks per loop iteration i.e. Tick timer Once every other instruction
+
+
+unbuffer objdump -D -b binary -m i8086 -M intel,i8086 ~/work/86em/roms/pcbios.bin | less -R
