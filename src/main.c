@@ -1,22 +1,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <signal.h>
 
 #include "vm_mem.h"
 #include "vm.h"
 #include "dbg.h"
 #include "util.h"
+#include "main.h"
+
+void signal_handler(int signal) {
+    if (signal == SIGINT) {
+        stop_flag = -1;
+    }
+}
 
 int main(int argc, char **argv) {
+    signal(SIGINT, signal_handler);
+
     int dbg = 0;
     int trace = 0;
     opterr = 0;
     int c;
+    char* arg_command;
 
-    while ((c = getopt(argc, argv, "dt")) != -1 ) {
+    while ((c = getopt(argc, argv, "dtc:")) != -1 ) {
         switch (c) {
             case 'd': dbg = 1; break;
             case 't': trace = 1; break;
+            case 'c': {
+                arg_command = optarg;
+                break;  
+            } 
             default: 
                 abort();
         }
@@ -48,9 +63,12 @@ int main(int argc, char **argv) {
 
     vm->opts.enable_trace = trace;
 
+    if (arg_command != NULL) {
+        dbg_run_cmds(vm, arg_command);
+    } 
     if (dbg) {
         vm->opts.enable_trace = 1;
-        dbg_intf(vm);
+        dbg_repl(vm);
     } else {
         vm_run(vm, -1);
     }

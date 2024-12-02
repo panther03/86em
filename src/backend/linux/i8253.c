@@ -3,6 +3,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 i8253_state_t i8253_state;
 
@@ -21,6 +22,8 @@ void i8253_cr_write(uint8_t val) {
     i8253_state.init = true;
     // only care about counter 0
     if ((val & 0b11000000) == 0) {
+        printf("why\n");
+        exit(EXIT_FAILURE);
         if ((val & 0b00110000) == 0) {
             // Latch mode
             i8253_state.ctrs_latch[0] = i8253_state.ctrs[0].x;

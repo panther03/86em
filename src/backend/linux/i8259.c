@@ -19,7 +19,9 @@ void i8259_write_command(uint8_t val) {
         i8259_state.icw[0] = val;
         // Why Are You Not Using ICW4
         assert(i8259_state.icw[0] & I8259_ICW1_ICW4);
-        i8259_state.icw_ind++;
+        // Why Are You Trying To Cascade PICs
+        assert(i8259_state.icw[0] & I8259_ICW1_SINGL);
+        i8259_state.icw_ind = 1;
     } else if (val == I8259_EOI) {
         // End of Interrupt
         // Clear highest priority ISR bit
@@ -39,7 +41,15 @@ void i8259_write_data(uint8_t val) {
         i8259_state.imr = val;
     } else if (i8259_state.icw_ind > 0) {
         i8259_state.icw[i8259_state.icw_ind] = val;
-        i8259_state.icw_ind = (i8259_state.icw_ind + 1) % 4;
+        if (i8259_state.icw_ind == 1) {
+            i8259_state.icw_ind = 3;
+        } else {
+            i8259_state.icw_ind = 0;
+        }
+    }
+    printf("IMR=%02x\n", i8259_state.imr);
+    for (int i = 0; i < 4; i++) {
+        printf("ICW[%d]=%02x\n", i, i8259_state.icw[i]);
     }
 }
 
@@ -76,7 +86,8 @@ void i8259_tick() {
 uint8_t i8259_ack() {
     // Interrupt line should still be high when we process this, since we handle things atomically
     assert(i8259_int());
-    uint8_t mask = CALCULATE_ISR_MASK(i8259_state.isr) & i8259_state.imr;
+    uint8_t mask = CALCULATE_ISR_MASK(i8259_state.isr) & ~i8259_state.imr;
+    
     int i;
     for (i = 0; i < 8; i++) {
         if ((1 << i) & i8259_state.irr & mask) {
@@ -85,6 +96,6 @@ uint8_t i8259_ack() {
             break;
         }
     }
-    uint8_t vector_ofs = (i8259_state.icw[2] & I8259_ICW2_OFS_MASK);
+    uint8_t vector_ofs = (i8259_state.icw[1] & I8259_ICW2_OFS_MASK);
     return vector_ofs + i;
 }

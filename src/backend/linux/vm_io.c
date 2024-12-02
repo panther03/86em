@@ -27,7 +27,7 @@ void io_init() {
     i8259_init();
     i8237_init();
     i8253_init(&i8259_state.irqs[0]);
-    kbd_init(&i8259_state.irqs[2]);
+    kbd_init(&i8259_state.irqs[1]);
 }
 
 uint8_t io_int_ack() {
@@ -47,7 +47,7 @@ void io_access_u16(uint16_t addr) {
 }
 
 void io_write_u16(uint16_t addr, uint16_t data) {    
-    printf("write %04x", addr);
+    printf("write %04x\n", addr);
     io_access_u16(addr);
     if (addr <= DMA_CHAN_REG_END) {
         i8237_chan_write(addr, data);
@@ -80,10 +80,7 @@ void io_write_u16(uint16_t addr, uint16_t data) {
                 // enable keyboard 
                 global_io.sense_sw_en = false;
             }
-            // stupid hack to detect KB reset
-            if (data == 0xCC) {
-                kbd_reset();
-            }
+            kbd_update_state((data >> 6) & 3);
             break;
         }
         case 0xFF: { exit(data); }
@@ -133,7 +130,7 @@ void io_tick(uint64_t cycles) {
         i8253_tick();
     }
 
-    kbd_tick(global_io.sense_sw_en);
+    kbd_tick();
     
     i8259_tick();
 }

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 typedef struct {
     uint8_t icw[4];
@@ -16,6 +17,7 @@ typedef struct {
 
 #define I8259_ICW1_INIT     0x10
 #define I8259_ICW1_ICW4     0x01
+#define I8259_ICW1_SINGL    0x02     
 #define I8259_ICW2_OFS_MASK 0xF8
 #define I8259_EOI           0x20
 
@@ -41,7 +43,7 @@ void i8259_tick();
 
 // TODO unsure if this is correct but it seems like it might
 static inline bool i8259_int() {
-    return (((i8259_state.irr & i8259_state.imr) & CALCULATE_ISR_MASK(i8259_state.isr)) != 0);
+    return (((i8259_state.irr & ~i8259_state.imr) & CALCULATE_ISR_MASK(i8259_state.isr)) != 0);
 }
 
 uint8_t i8259_ack();

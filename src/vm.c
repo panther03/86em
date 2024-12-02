@@ -8,6 +8,7 @@
 #include "vm.h"
 #include "vm_io.h"
 #include "vm_mem.h"
+#include "main.h"
 
 #include "opc.h"
 
@@ -523,7 +524,6 @@ uint32_t x86_shift(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
     switch (op) {
     // SHL
     case 0b100: {
-        printf("%08x %08x\n", x, shamt);
         cpu->flags.c_f = (x >> carry_shamt);
         x <<= shamt;
         if (shamt == 1) {
@@ -559,7 +559,6 @@ uint32_t x86_shift(x86_cpu_t *cpu, uint8_t op, uint32_t x, uint32_t shamt,
         cpu->flags.s_f = (x >> (op_size - 1));
         cpu->flags.z_f = ((x & op_mask) == 0);
     }
-    //printf("%08x\n", x);
     return x;
 }
 
@@ -748,14 +747,12 @@ static inline void x86_group1(x86_cpu_t *cpu, uint8_t is_16) {
             if (divisor == 0) goto DIVEXC;
 
             uint32_t dividend = (cpu->d.x << 16) + cpu->a.x;
-            printf("%08x %08x\n", dividend, divisor);
             int32_t remainder;
             int32_t quotient;
             if (mod_reg_rm.reg & 1) {
                 remainder = (int32_t)dividend % (int32_t)divisor;
                 quotient = (int32_t)dividend / (int32_t)divisor;
                 int32_t res_sign = (dividend ^ divisor) & 0x80000000;
-                printf("r %08x q %08x\n", remainder, quotient);
                 
                 if ((!res_sign && (uint32_t)quotient > 0x7FFF)
                     || ((uint32_t)quotient < 0xFFFF8000) || (remainder && ((uint32_t)quotient == 0xFFFF8000)))
@@ -916,6 +913,7 @@ void vm_run(vm_t *vm, int max_cycles) {
     //((addr = SEGMENT(cpu->cs, cpu->ip)) < prog_end)
     while ((max_cycles < 0 ||
             ((vm->cycles - cyc_start) < ((uint64_t)max_cycles)))) {
+        if (stop_flag) return;
         addr = SEGMENT(cpu->cs, cpu->ip);
         if (addr == vm->bkpt && !vm->bkpt_clear) {
             printf("Breakpoint hit at %08x\n", addr);

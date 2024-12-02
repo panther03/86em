@@ -21,6 +21,14 @@ int parse_offset_segment(char* offset_segment) {
 }
 
 
+bool sep_whitespace(char c){ 
+    return isspace(c);
+}
+
+bool sep_semi(char c){ 
+    return c == ';';
+}
+
 
 char* arg_next(arg_split_t *it) {
     if (it->consumed) return NULL;
@@ -40,7 +48,7 @@ char* arg_next(arg_split_t *it) {
     char* start = it->buf;
 
     // Move to the next whitespace or end of string
-    while (*(it->buf) && !isspace(*(it->buf))) {
+    while (*(it->buf) && !it->sep_match(*(it->buf))) {
         it->buf++;
     }
 

@@ -1,8 +1,12 @@
 #include "cga.h"
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 
 #include "vm_mem.h"
+#include "main.h"
+
+volatile sig_atomic_t stop_flag = 0;
 
 cga_state_t cga_state;
 
@@ -39,7 +43,7 @@ static inline void cga_loop()
     SDL_Event e;
     bool running = true;
     uint32_t *screen = (uint32_t *)malloc(320 * 200 * sizeof(uint32_t));
-    while (running)
+    while (running && !stop_flag)
     {
         while (SDL_PollEvent(&e) > 0)
         {
