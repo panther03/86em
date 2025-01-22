@@ -331,10 +331,9 @@ static inline mod_reg_rm_t read_mod_reg_rm(x86_cpu_t *cpu) {
 static inline uint32_t mod_rm_effective_addr(x86_cpu_t *cpu,
                                              mod_reg_rm_t mod_reg_rm) {
     uint32_t base = mod_reg_rm.disp + get_16b_mem_base(cpu, mod_reg_rm);
-    base = base & 0xFFFF;
     assert(-2 <= cpu->seg_override && cpu->seg_override <= 3);
-    uint32_t addr = SEGMENT(x86_get_data_segment(cpu), base);
-    //printf("mod rm addr: %08x\n", addr);
+    uint32_t addr = (((uint32_t)x86_get_data_segment(cpu)) << 16) + (base & 0xFFFF);
+    //printf("effective seg %04x ofs %04x\n", addr >> 16, addr & 0xFFFF);
     return addr;
 }
 
@@ -347,7 +346,7 @@ uint32_t read_mod_rm(x86_cpu_t *cpu, mod_reg_rm_t mod_reg_rm,
         return reg;
     } else {
         uint32_t addr = mod_rm_effective_addr(cpu, mod_reg_rm);
-        return is_16 ? load_u16(addr) : load_u8(addr);
+        return is_16 ? load_u16(addr >> 16, addr & 0xFFFF) : load_u8(addr >> 16, addr & 0xFFFF);
     }
 }
 
@@ -363,9 +362,9 @@ void write_mod_rm(x86_cpu_t *cpu, mod_reg_rm_t mod_reg_rm, uint32_t val,
     } else {
         uint32_t addr = mod_rm_effective_addr(cpu, mod_reg_rm);
         if (is_16) {
-            store_u16(addr, val);
+            store_u16(addr >> 16, addr & 0xFFFF, val);
         } else {
-            store_u8(addr, val);
+            store_u8(addr >> 16, addr & 0xFFFF, val);
         }        
     }
 }
@@ -379,10 +378,11 @@ static inline uint8_t parity_byte(uint8_t op) {
 
 uint32_t x86_add(x86_cpu_t *cpu, uint32_t op1, uint32_t op2, uint32_t carry,
                  uint8_t is_16) {
-    uint32_t res = op1 + op2 + carry;
+    //printf("%08x, %08x, %08x", op1, op2, carry);
     uint32_t op_size = is_16 ? 16 : 8;
     uint32_t top_bit = 1 << (op_size - 1);
     uint32_t mask = (1 << (op_size)) - 1;
+    uint32_t res = (op1 & mask) + (op2 & mask) + carry;
     cpu->flags.c_f = (res >> op_size);
     cpu->flags.s_f = (res >> (op_size - 1));
     cpu->flags.o_f = ((~(op1 ^ op2) & (op1 ^ res)) & top_bit) ? 1 : 0;
@@ -591,75 +591,77 @@ uint32_t x86_arith(x86_cpu_t *cpu, uint8_t fnc, uint32_t op1, uint32_t op2,
 
 static inline void x86_string_insn(x86_cpu_t *cpu, uint8_t opc) {
     uint8_t sz = opc & 0x1;
-    int src_addr = SEGMENT(x86_get_data_segment(cpu), cpu->si);
-    int dest_addr = SEGMENT(cpu->es, cpu->di);
+    int src_seg = x86_get_data_segment(cpu);
+    int src_ofs = cpu->si;
+    int dest_seg = cpu->es;
+    int dest_ofs = cpu->di;
     int si_ofs = 0;
     int di_ofs = 0;
     switch (opc) {
     // MOVS (8-bit)
     case 0xA4: {
-        store_u8(dest_addr, load_u8(src_addr));
+        store_u8(dest_seg, dest_ofs, load_u8(src_seg, src_ofs));
         si_ofs = 1;
         di_ofs = 1;
         break;
     }
     // MOVS (16-bit)
     case 0xA5: {
-        store_u16(dest_addr, load_u16(src_addr));
+        store_u16(dest_seg, dest_ofs, load_u16(src_seg, src_ofs));
         si_ofs = 2;
         di_ofs = 2;
         break;
     }
     // CMPS (8-bit)
     case 0xA6: {
-        x86_sub(cpu, load_u8(src_addr), load_u8(dest_addr), 0, sz);
+        x86_sub(cpu, load_u8(src_seg, src_ofs), load_u8(dest_seg, dest_ofs), 0, sz);
         si_ofs = 1;
         di_ofs = 1;
         break;
     }
     // CMPS (16-bit)
     case 0xA7: {
-        x86_sub(cpu, load_u16(src_addr), load_u16(dest_addr), 0, sz);
+        x86_sub(cpu, load_u16(src_seg, src_ofs), load_u16(dest_seg, dest_ofs), 0, sz);
         si_ofs = 2;
         di_ofs = 2;
         break;
     }
     // STOS (8-bit)
     case 0xAA: {
-        store_u8(dest_addr, cpu->a.b.l);
+        store_u8(dest_seg, dest_ofs, cpu->a.b.l);
         si_ofs = 1;
         di_ofs = 1;
         break;
     }
     // STOS (16-bit)
     case 0xAB: {
-        store_u16(dest_addr, cpu->a.x);
+        store_u16(dest_seg, dest_ofs, cpu->a.x);
         si_ofs = 2;
         di_ofs = 2;
         break;
     }
     // LODS (8-bit)
     case 0xAC: {
-        cpu->a.b.l = load_u8(src_addr);
+        cpu->a.b.l = load_u8(src_seg, src_ofs);
         si_ofs = 1;
         break;
     }
     // LODS (16-bit)
     case 0xAD: {
-        cpu->a.x = load_u16(src_addr);
+        cpu->a.x = load_u16(src_seg, src_ofs);
         si_ofs = 2;
         break;
     }
     // SCAS (8-bit)
     case 0xAE: {
-        x86_sub(cpu, cpu->a.b.l, load_u8(dest_addr), 0, sz);
+        x86_sub(cpu, cpu->a.b.l, load_u8(dest_seg, dest_ofs), 0, sz);
         si_ofs = 1;
         di_ofs = 1;
         break;
     }
     // SCAS (16-bit)
     case 0xAF: {
-        x86_sub(cpu, cpu->a.x, load_u16(dest_addr), 0, sz);
+        x86_sub(cpu, cpu->a.x, load_u16(dest_seg, dest_ofs), 0, sz);
         si_ofs = 2;
         di_ofs = 2;
         break;
@@ -897,8 +899,8 @@ INTERRUPT_FOUND:;
         push_u16(cpu, cpu->ip);
         // CALL INTERRUPT SERVICE ROUTINE
         assert(int_src < 256);
-        cpu->ip = load_u16(int_src * 4);
-        cpu->cs = load_u16(int_src * 4 + 2);
+        cpu->ip = load_u16(0, int_src * 4);
+        cpu->cs = load_u16(0, int_src * 4 + 2);
     } while (temp_tf); // add NMI check here to enable NMI functionality
 }
 
@@ -1156,6 +1158,10 @@ void vm_run(vm_t *vm, int max_cycles) {
                 push_u16(cpu, cpu->cs);
                 break;
             }
+            case 0x1E: {
+                push_u16(cpu, cpu->ds);
+                break;
+            }
             case 0x1F: {
                 cpu->ds = pop_u16(cpu);
                 break;
@@ -1224,7 +1230,7 @@ void vm_run(vm_t *vm, int max_cycles) {
             }
             // CWD
             case 0x99: {
-                cpu->d.x = (cpu->a.x & 0x80) ? 0xFF : 0;
+                cpu->d.x = (cpu->a.x & 0x8000) ? 0xFFFF : 0;
                 break;
             }
             // CALL (FAR, ABSOLUTE)
@@ -1261,26 +1267,22 @@ void vm_run(vm_t *vm, int max_cycles) {
             }
             case 0xA0: {
                 uint32_t offset = LOAD_IP_WORD(cpu);
-                uint32_t addr = SEGMENT(x86_get_data_segment(cpu), offset);
-                cpu->a.b.l = load_u8(addr);
+                cpu->a.b.l = load_u8(x86_get_data_segment(cpu), offset);
                 break;
             }
             case 0xA1: {
                 uint32_t offset = LOAD_IP_WORD(cpu);
-                uint32_t addr = SEGMENT(x86_get_data_segment(cpu), offset);
-                cpu->a.x = load_u16(addr);
+                cpu->a.x = load_u16(x86_get_data_segment(cpu), offset);
                 break;
             }
             case 0xA2: {
                 uint32_t offset = LOAD_IP_WORD(cpu);
-                uint32_t addr = SEGMENT(x86_get_data_segment(cpu), offset);
-                store_u8(addr, cpu->a.b.l);
+                store_u8(x86_get_data_segment(cpu), offset, cpu->a.b.l);
                 break;
             }
             case 0xA3: {
                 uint32_t offset = LOAD_IP_WORD(cpu);
-                uint32_t addr = SEGMENT(x86_get_data_segment(cpu), offset);
-                store_u16(addr, cpu->a.x);
+                store_u16(x86_get_data_segment(cpu), offset, cpu->a.x);
                 break;
             }
             case 0xA8: {
@@ -1309,11 +1311,11 @@ void vm_run(vm_t *vm, int max_cycles) {
             case 0xC5: {
                 mod_reg_rm_t mod_reg_rm = read_mod_reg_rm(cpu);
                 uint32_t op1 = mod_rm_effective_addr(cpu, mod_reg_rm);
-                write_reg_u16(cpu, mod_reg_rm.reg, load_u16(op1));
+                write_reg_u16(cpu, mod_reg_rm.reg, load_u16(op1 >> 16, op1 & 0xFFFF));
                 if (opc & 1) {
-                    cpu->ds = load_u16(op1+2);
+                    cpu->ds = load_u16(op1 >> 16, (op1 & 0xFFFF)+2);
                 } else {
-                    cpu->es = load_u16(op1+2);
+                    cpu->es = load_u16(op1 >> 16, (op1 & 0xFFFF)+2);
                 }
                 break;
             }
@@ -1363,9 +1365,8 @@ void vm_run(vm_t *vm, int max_cycles) {
             }
             // XLATB
             case 0xD7: {
-                    uint32_t addr = SEGMENT(x86_get_data_segment(cpu), ((cpu->b.x + cpu->a.b.l) & 0xFFFF));
                 cpu->a.b.l =
-                    load_u8(addr);
+                    load_u8(x86_get_data_segment(cpu), ((cpu->b.x + cpu->a.b.l) & 0xFFFF));
                 break;
             }
             // LOOPNZ
@@ -1551,8 +1552,8 @@ void vm_run(vm_t *vm, int max_cycles) {
                 case 0b011: {
                     push_u16(cpu, cpu->cs);
                     push_u16(cpu, cpu->ip);
-                    cpu->ip = load_u16(addr);
-                    cpu->cs = load_u16(addr + 2);
+                    cpu->ip = load_u16(addr >> 16, addr & 0xFFFF);
+                    cpu->cs = load_u16(addr >> 16, (addr & 0xFFFF) + 2);
                     break;
                 }
                 // Near jump absolute
@@ -1563,14 +1564,14 @@ void vm_run(vm_t *vm, int max_cycles) {
                 // Far jump absolute
                 // TODO idk if it works the same as the far call
                 case 0b101: {
-                    cpu->ip = load_u16(addr);
-                    cpu->cs = load_u16(addr + 2);
+                    cpu->ip = load_u16(addr >> 16, addr & 0xFFFF);
+                    cpu->cs = load_u16(addr >> 16, (addr & 0xFFFF) + 2);
                     break;
                 }
                 // Push
                 case 0b110: {
-                    store_u8(SEGMENT(cpu->ss, cpu->sp+1), op1 >> 8);
-                    store_u8(SEGMENT(cpu->ss, cpu->sp), op1);
+                    store_u8(cpu->ss, cpu->sp+1, op1 >> 8);
+                    store_u8(cpu->ss, cpu->sp, op1);
                     break;
                 }
                 default: {

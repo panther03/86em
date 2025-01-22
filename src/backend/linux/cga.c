@@ -20,8 +20,8 @@ static inline void textmode_update(uint32_t *screen)
         {
             int cc_ind = (40 * i + j) << 1;
             int attr_ind = cc_ind + 1;
-            uint8_t cc = load_u8(CGA_MEM_ADDR + cc_ind);
-            uint8_t attr = load_u8(CGA_MEM_ADDR + attr_ind);
+            uint8_t cc = load_u8(CGA_MEM_SEG, cc_ind);
+            uint8_t attr = load_u8(CGA_MEM_SEG,  attr_ind);
 
             uint32_t c_f = 0x7F000000 + ((attr & 0x08) ? 0x7F7F7F : 0) + ((BYTE_MASK(attr, 2) & 0x7F) << 16) + ((BYTE_MASK(attr, 1) & 0x7F) << 8) + (BYTE_MASK(attr, 0) & 0x7F);
             uint32_t c_b = 0x7F000000 + ((attr & 0x80) ? 0x7F7F7F : 0) + ((BYTE_MASK(attr, 6) & 0x7F) << 16) + ((BYTE_MASK(attr, 5) & 0x7F) << 8) + (BYTE_MASK(attr, 4) & 0x7F);

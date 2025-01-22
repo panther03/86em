@@ -15,10 +15,10 @@
         },
         {
             "name": "Launch emulator",
-            "type": "cppdbg",
+            "type": "gdb",
             "request": "launch",
-            "program": "${workspaceRoot}/86em",
-            "args": ["testprog.bin", "1048560"],
+            "target": "${workspaceRoot}/86em",
+            "arguments": ["testprog.bin", "1048560"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
@@ -36,6 +36,15 @@
                     "ignoreFailures": true
                 }
             ]
+        },
+        {
+            "name": "Launch testdriver",
+            "type": "gdb",
+            "request": "launch",
+            "target": "${workspaceRoot}/build/testdriver",
+            "arguments": "tests/8088/v2 8F",
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}"
         }
     ]
 }

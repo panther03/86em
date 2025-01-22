@@ -111,7 +111,7 @@ int run_testcase(struct json_object *testcase) {
         TESTCASE_ASSERT(ram_entry_arr->length == 2);
         int addr = json_object_get_int(ram_entry_arr->array[0]); 
         uint8_t val = json_object_get_int(ram_entry_arr->array[1]);
-        store_u8(addr, val);
+        store_u8((addr & 0xF0000) >> 4, addr & 0xFFFF, val);
     }
 
     vm_run(vm, 1);
@@ -141,7 +141,7 @@ int run_testcase(struct json_object *testcase) {
         TESTCASE_ASSERT(ram_entry_arr->length == 2);
         int addr = json_object_get_int(ram_entry_arr->array[0]); 
         uint8_t expected = json_object_get_int(ram_entry_arr->array[1]);
-        uint8_t actual = load_u8(addr);
+        uint8_t actual = load_u8((addr & 0xF0000) >> 4, addr & 0xFFFF);
         if (expected != actual) {
             fprintf(stdout,"\n\tram[%x] expected %04x got %04x", addr, expected, actual);
             ret = -1; 
@@ -428,11 +428,13 @@ int main(int argc, char **argv) {
         // Split arg into OPCODE.REG if applicable
         char *opcode = argv[i];
         char *reg = opcode;
+        bool reg_expected = false;
         while (*reg != '.' && *reg != '\0') reg++;
         if (*reg != '\0') {
             *(reg++) = '\0';
+            reg_expected = true;
         } else {
-            reg = NULL;
+            reg = "0";
         }
         
 
@@ -442,18 +444,16 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Can't find %s in metadata json\n", opcode);
             exit(EXIT_FAILURE);
         }
-        if (reg) {
-            ub_obj = json_object_object_get(ub_obj, "reg");
-            if (!ub_obj) {
-                fprintf(stderr, "Tried looking for register map in opcode %s, but failed\n", opcode);
-                exit(EXIT_FAILURE);
-            }
-            ub_obj = json_object_object_get(ub_obj, reg);
+        struct json_object *reg_obj = json_object_object_get(ub_obj, "reg");
+        if (reg_obj) {
+            ub_obj = json_object_object_get(reg_obj, reg);
             if (!ub_obj) {
                 fprintf(stderr, "Tried looking for register %s in register map, but failed\n", reg);
                 exit(EXIT_FAILURE);
             }
-
+        } else if (reg_expected) {
+            fprintf(stderr, "Tried looking for register map in opcode %s, but failed\n", opcode);
+            exit(EXIT_FAILURE);
         }
         const char *status = json_object_get_string(json_object_object_get(ub_obj, "status"));
         if (strcmp(status, "alias") == 0) goto PASS;

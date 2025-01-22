@@ -92,9 +92,9 @@ void i8237_xfer(uint8_t chan, uint8_t *buf) {
         addr_cnt = direction * ofs + chan_obj->addr.x;
         if (chan_obj->wr_en) {
             uint8_t val = buf[ofs];
-            store_u8(addr_base + addr_cnt, val);
+            store_u8((addr_base >> 4), addr_cnt, val);
         } else {
-            uint8_t val = load_u8(addr_base + addr_cnt);
+            uint8_t val = load_u8((addr_base >> 4), addr_cnt);
             buf[ofs] = val;
         }
     }

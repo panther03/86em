@@ -1,5 +1,5 @@
 BACKEND ?= LINUX
-TESTROUTINE ?= 
+TESTROUTINE ?= add
 
 BUILD = build/
 SRCS = src/vm.c \
@@ -24,6 +24,10 @@ $(BUILD)/86em: $(OBJS) $(OBJS_$(BACKEND)) $(BUILD)/main.o
 TESTDRIVER: $(BUILD)/testdriver
 $(BUILD)/testdriver: $(OBJS) $(OBJS_$(BACKEND)) $(BUILD)/testdriver.o
 	$(CC) -o $@ $^  $(LDFLAGS) $(LDFLAGS_$(BACKEND)) -lz -ljson-c
+
+TESTROM: build/testprog.bin
+build/testprog.bin: tests/routines/$(PROG).asm
+	nasm -O0 $^ -f bin -o $@
 
 $(BUILD)/%.o: tests/%.c
 	@mkdir -p $(dir $@)
