@@ -23,7 +23,7 @@ extern cga_state_t cga_state;
 #define CGA_REG_COLOR 0x3D9
 #define CGA_REG_STATUS 0x3DA
 
-#define CGA_MEM_SEG 0xA400
+#define CGA_COLOR_ADDR 0xB8000
 #define CGA_FONTROM_SIZE 2048
 
 #define CGA_REG_START CGA_REG_MODE

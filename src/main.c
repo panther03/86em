@@ -37,28 +37,34 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (argc - optind < 2) {
-        printf("Expected path to bin file and offset.\n");
-        return 1;
-    }
-    // Arguments: bin file, offset (segments pre-computed)
-    const char *path = argv[optind];
-    const int offset = parse_offset_segment(argv[optind + 1]);
-    if (offset < 0) {
-        printf("Expected segment of the form abcd:1234 (not 0)\n");
-        exit(1);
-    }
-    printf("%s\n", path);
-
-    FILE* prog = fopen(path, "r");
-    if (prog == NULL) {
-        printf("Can't open file: %s\n", path);
+    int remain_args = argc - optind;
+    if (remain_args < 2 || remain_args % 2) {
+        printf("Expected path to one or more [bin file and offset].\n");
         return 1;
     }
 
-    init_mem(prog, offset);
-    fclose(prog);
-    
+    init_mem_blank();
+    for (int i = 0; i < (remain_args >> 1); i++) {
+        // Arguments: bin file, offset (segments pre-computed)
+        const char *path = argv[optind];
+        const int offset = parse_offset_segment(argv[optind + 1]);
+        if (offset < 0) {
+            printf("Expected segment of the form abcd:1234 (not 0)\n");
+            exit(1);
+        }
+        printf("%s\n", path);
+        
+        FILE* prog = fopen(path, "r");
+        if (prog == NULL) {
+            printf("Can't open file: %s\n", path);
+            return 1;
+        }
+
+        load_mem(prog, offset);
+        fclose(prog);
+        optind += 2;
+    }
+
     vm_t* vm = vm_init();
 
     vm->opts.enable_trace = trace;
@@ -75,4 +81,3 @@ int main(int argc, char **argv) {
 
     return 0;
 }
-

@@ -59,6 +59,7 @@ void io_write_u16(uint16_t addr, uint16_t data) {
     switch(addr) {
         case CGA_REG_MODE: {
             SDL_LockMutex(cga_state.lock);
+            printf("mode %02x\n", data & 0xFF);
             cga_state.mode = data & 0xFF;
             SDL_UnlockMutex(cga_state.lock);
             break;
@@ -88,7 +89,8 @@ void io_write_u16(uint16_t addr, uint16_t data) {
     }
 }
 
-uint16_t io_read_u16(uint16_t addr) {
+uint16_t io_read_u16(uint16_t addr, uint16_t pc) {
+    static uint32_t blank_ctr = 0;
     io_access_u16(addr);
     if (addr <= DMA_CHAN_REG_END) {
         return i8237_chan_read(addr);
@@ -116,8 +118,22 @@ uint16_t io_read_u16(uint16_t addr) {
             // TODO
             return 0;
         }
+        case 0x278:
+        case 0x378:
+        case 0x3BC: {
+            // printer thing
+            return 0;
+        }
+        case 0x201:
+        case 0x2FA:
+        case 0x3FA: {
+            // uart thing
+            return 0xFF;
+        }
+        case CGA_REG_STATUS: blank_ctr++; return (blank_ctr % 8) ? 0x04 : 0x0B; // Display enabled, vertical retrace interval not set 
         default: {
             printf("unrecognized rd port %04x\n", addr);
+            printf("HELP!. HELP!. HELP!. %04x\n", pc);
             exit(EXIT_FAILURE);
         };
     }

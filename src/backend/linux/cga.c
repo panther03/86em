@@ -20,8 +20,8 @@ static inline void textmode_update(uint32_t *screen)
         {
             int cc_ind = (40 * i + j) << 1;
             int attr_ind = cc_ind + 1;
-            uint8_t cc = load_u8(CGA_MEM_SEG, cc_ind);
-            uint8_t attr = load_u8(CGA_MEM_SEG,  attr_ind);
+            uint8_t cc = load_u8_direct(CGA_COLOR_ADDR + cc_ind);
+            uint8_t attr = load_u8_direct(CGA_COLOR_ADDR + attr_ind);
 
             uint32_t c_f = 0x7F000000 + ((attr & 0x08) ? 0x7F7F7F : 0) + ((BYTE_MASK(attr, 2) & 0x7F) << 16) + ((BYTE_MASK(attr, 1) & 0x7F) << 8) + (BYTE_MASK(attr, 0) & 0x7F);
             uint32_t c_b = 0x7F000000 + ((attr & 0x80) ? 0x7F7F7F : 0) + ((BYTE_MASK(attr, 6) & 0x7F) << 16) + ((BYTE_MASK(attr, 5) & 0x7F) << 8) + (BYTE_MASK(attr, 4) & 0x7F);
@@ -45,29 +45,29 @@ static inline void cga_loop()
     uint32_t *screen = (uint32_t *)malloc(320 * 200 * sizeof(uint32_t));
     while (running && !stop_flag)
     {
-        while (SDL_PollEvent(&e) > 0)
-        {
-            if (e.type == SDL_QUIT)
-            {
-                running = false;
-            }
-        }
+       while (SDL_PollEvent(&e) > 0)
+       {
+           if (e.type == SDL_QUIT)
+           {
+               running = false;
+           }
+       }
 
-        if (cga_state.mode & 0b10)
-        {
-            // Graphics mode
-            // TBD
-        }
-        else
-        {
-            // Text mode
-            textmode_update(screen);
-        }
+       if (cga_state.mode & 0x2)
+       {
+           // Graphics mode
+           // TBD
+       }
+       else
+       {
+           // Text mode
+           textmode_update(screen);
+       }
 
-        SDL_UpdateTexture(cga_state.tex, NULL, screen, 320 * sizeof(uint32_t));
-        SDL_RenderClear(cga_state.renderer);
-        SDL_RenderCopy(cga_state.renderer, cga_state.tex, NULL, NULL);
-        SDL_RenderPresent(cga_state.renderer);
+       SDL_UpdateTexture(cga_state.tex, NULL, screen, 320 * sizeof(uint32_t));
+       SDL_RenderClear(cga_state.renderer);
+       SDL_RenderCopy(cga_state.renderer, cga_state.tex, NULL, NULL);
+       SDL_RenderPresent(cga_state.renderer);
     }
     free(screen);
     SDL_DestroyRenderer(cga_state.renderer);

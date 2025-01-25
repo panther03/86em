@@ -629,14 +629,12 @@ static inline void x86_string_insn(x86_cpu_t *cpu, uint8_t opc) {
     // STOS (8-bit)
     case 0xAA: {
         store_u8(dest_seg, dest_ofs, cpu->a.b.l);
-        si_ofs = 1;
         di_ofs = 1;
         break;
     }
     // STOS (16-bit)
     case 0xAB: {
         store_u16(dest_seg, dest_ofs, cpu->a.x);
-        si_ofs = 2;
         di_ofs = 2;
         break;
     }
@@ -667,7 +665,6 @@ static inline void x86_string_insn(x86_cpu_t *cpu, uint8_t opc) {
         break;
     }
     }
-    //printf("%d %d\n", si_ofs, di_ofs);
     if (cpu->flags.d_f) {
         cpu->si -= si_ofs;
         cpu->di -= di_ofs;
@@ -1398,12 +1395,12 @@ void vm_run(vm_t *vm, int max_cycles) {
             }
             case 0xE4: {
                 uint32_t imm = LOAD_IP_BYTE(cpu);
-                cpu->a.b.l = io_read_u16(imm);
+                cpu->a.b.l = io_read_u16(imm, cpu->ip);
                 break;
             }
             case 0xE5: {
                 uint32_t imm = LOAD_IP_BYTE(cpu);
-                cpu->a.x = io_read_u16(imm);
+                cpu->a.x = io_read_u16(imm, cpu->ip);
                 break;
             }
             case 0xE6: {
@@ -1417,11 +1414,11 @@ void vm_run(vm_t *vm, int max_cycles) {
                 break;
             }
             case 0xEC: {
-                cpu->a.b.l = io_read_u16(cpu->d.x);
+                cpu->a.b.l = io_read_u16(cpu->d.x, cpu->ip);
                 break;
             }
             case 0xED: {
-                cpu->a.x = io_read_u16(cpu->d.x);
+                cpu->a.x = io_read_u16(cpu->d.x, cpu->ip);
                 break;
             }
             case 0xEE: {

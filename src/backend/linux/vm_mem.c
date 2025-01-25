@@ -15,8 +15,7 @@ void init_mem_blank() {
     mem = (uint8_t*)malloc(MEM_SIZE);
 }
 
-void init_mem(FILE *prog, int offset) {
-    mem = (uint8_t*)malloc(MEM_SIZE);
+void load_mem(FILE *prog, int offset) {
     assert(offset < MEM_SIZE);
     uint8_t* imem = mem + offset;
 

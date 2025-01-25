@@ -15,11 +15,15 @@ extern prog_info_t prog_info;
 
 
 void init_mem_blank();
-void init_mem(FILE *prog, int offset);
+void load_mem(FILE *prog, int offset);
 
 // memory is little endian
 static inline uint8_t load_u8(uint16_t seg, uint16_t offset) {
     return mem[SEGMENT(seg, offset)];
+}
+
+static inline uint8_t load_u8_direct(uint32_t addr) {
+    return mem[addr & 0xFFFFF];
 }
 
 // todo: this is not actually how it works on x86..
@@ -41,6 +45,10 @@ static inline void store_u16(uint16_t seg, uint16_t offset, uint16_t val) {
 
 static inline void store_u8(uint16_t seg, uint16_t offset, uint8_t val) {
     mem[SEGMENT(seg, offset)] = val;
+}
+
+static inline void store_u8_direct(uint32_t addr, uint8_t val) {
+    mem[addr & 0xFFFFF] = val;
 }
 
 #endif // VM_MEM_H

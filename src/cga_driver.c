@@ -11,8 +11,8 @@ int main() {
         for (int i = 0; i < 25; i++) {
             for (int j = 0; j < 40; j++) {
                 int ind = (40 * i + j) << 1;
-                store_u8(CGA_MEM_ADDR + ind, c);
-                store_u8(CGA_MEM_ADDR + ind+1, c+d);
+                store_u8_direct(CGA_MEM_ADDR + ind, c);
+                store_u8_direct(CGA_MEM_ADDR + ind+1, c+d);
             }
         }
         c = c + 1;

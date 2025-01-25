@@ -11,6 +11,7 @@
 #include "main.h"
 #include "util.h"
 #include "vm.h"
+#include "vm_mem.h"
 
 /* A static variable for holding the line. */
 static char *line_read = (char *)NULL;
@@ -68,6 +69,17 @@ void dbg_cmd(vm_t *vm, char *line) {
         }
         vm->bkpt = bkpt_d;
         vm->bkpt_clear = false;
+    } else if (strcmp(cmd, "peek") == 0 || strcmp(cmd, "pe") == 0) {
+        char *addr = arg_next(&it);
+
+        char *addr_tmp = addr;
+        int32_t addr_d = parse_offset_segment(addr_tmp);
+        if (addr_d < 0) {
+            printf("Expected breakpoint argument, either segment or IP in "
+                    "hex");
+            return;
+        }
+        printf("ram[%08x] = %02x\n", addr_d, load_u8((addr_d & 0xF0000) >> 4, addr_d & 0xFFFF));
     } else if (strcmp(cmd, "trace") == 0 || strcmp(cmd, "t") == 0) {
         vm->opts.enable_trace = !vm->opts.enable_trace;
         printf("Tracing %s\n", vm->opts.enable_trace ? "on" : "off");
