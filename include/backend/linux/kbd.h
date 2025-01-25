@@ -4,15 +4,17 @@
 #include <SDL2/SDL_mutex.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define RESET_WAIT 50
 
 typedef struct {
-    uint8_t scancode;
+    uint8_t scancode_stack[8];
+    uint8_t scancode_ptr;
+    SDL_mutex *scancode_mutex;
     uint8_t state_sr;
     uint8_t reset_timer;
-    bool new_scancode;
     bool *irq;
 } kbd_state_t;
 
@@ -21,9 +23,10 @@ extern kbd_state_t kbd_state;
 static inline void kbd_init(bool *irq) {
     memset(&kbd_state, 0, sizeof(kbd_state_t));
     kbd_state.irq = irq;
-    kbd_state.new_scancode = false;
     kbd_state.reset_timer = 0;
-    kbd_state.scancode = 0xAA;
+    kbd_state.scancode_ptr = 0;
+    kbd_state.scancode_stack[0] = 0xAA;
+    kbd_state.scancode_mutex = SDL_CreateMutex();
 }
 
 static inline void kbd_update_state(uint8_t next) {
@@ -36,31 +39,34 @@ static inline void kbd_update_state(uint8_t next) {
     }
 }
 
-static inline void kbd_set_scancode(uint8_t scancode) {
-    if (kbd_state.scancode != 0xAA) {
-        kbd_state.scancode = scancode;
-        kbd_state.new_scancode = true;
+static inline void kbd_push_scancode(uint8_t scancode) {
+    SDL_LockMutex(kbd_state.scancode_mutex);
+    if (kbd_state.scancode_ptr < 8) {
+        kbd_state.scancode_stack[kbd_state.scancode_ptr++] = scancode;
     }
+    SDL_UnlockMutex(kbd_state.scancode_mutex);
 }
 
 static inline uint8_t kbd_read() {
-    uint8_t val = kbd_state.scancode;
-    kbd_state.scancode = 0;
+    uint8_t val = kbd_state.scancode_stack[0];
+    SDL_LockMutex(kbd_state.scancode_mutex);
+    if (kbd_state.scancode_ptr > 0) {
+        val = kbd_state.scancode_stack[--kbd_state.scancode_ptr];
+    }
+    SDL_UnlockMutex(kbd_state.scancode_mutex);
     return val;
 }
 
 static inline void kbd_tick() {
     if (kbd_state.reset_timer > 0 && kbd_state.reset_timer-- == 1) {
-        kbd_state.scancode = 0xAA;
-        kbd_state.new_scancode = true;
+        kbd_state.scancode_stack[0] = 0xAA;
+        kbd_state.scancode_ptr = 1;
     }
 
     if (kbd_state.state_sr & 2) {
         *(kbd_state.irq) = false;
-    } else if (kbd_state.new_scancode) {
+    } else if (kbd_state.scancode_ptr > 0) {
         *(kbd_state.irq) = true;
-        // a scancode could get eaten if kbd_set_scancode is ran right here
-        kbd_state.new_scancode = false;
     }
 }
 

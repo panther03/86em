@@ -47,7 +47,7 @@ void io_access_u16(uint16_t addr) {
 }
 
 void io_write_u16(uint16_t addr, uint16_t data) {    
-    printf("write %04x\n", addr);
+    //printf("write %04x\n", addr);
     io_access_u16(addr);
     if (addr <= DMA_CHAN_REG_END) {
         i8237_chan_write(addr, data);
@@ -85,7 +85,7 @@ void io_write_u16(uint16_t addr, uint16_t data) {
             break;
         }
         case 0xFF: { exit(data); }
-        default: { printf("unrecognized wr port %04x\n", addr); }
+        default: {} //printf("unrecognized wr port %04x\n", addr); }
     }
 }
 

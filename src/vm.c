@@ -877,7 +877,7 @@ static inline void x86_handle_interrupts(x86_cpu_t *cpu) {
     return;
 
 INTERRUPT_FOUND:;
-    printf("INTERRUPTED (%d)!!\n",int_src);
+    if (int_src == 0x9) printf("INTERRUPTED (%d)!!\n",int_src);
     uint8_t temp_tf;
 
     // TODO?

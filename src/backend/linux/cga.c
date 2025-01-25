@@ -1,10 +1,76 @@
 #include "cga.h"
+#include <SDL2/SDL_events.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 
 #include "vm_mem.h"
+#include "kbd.h"
 #include "main.h"
+
+const uint8_t SDL_to_PS2_scancode[] = {
+    /* SDL_SCANCODE_A to SDL_SCANCODE_Z */
+    [4] = 0x1e,  // A
+    [5] = 0x30,  // B
+    [6] = 0x2e,  // C
+    [7] = 0x20,  // D
+    [8] = 0x12,  // E
+    [9] = 0x21,  // F
+    [10] = 0x22, // G
+    [11] = 0x23, // H
+    [12] = 0x17, // I
+    [13] = 0x24, // J
+    [14] = 0x25, // K
+    [15] = 0x26, // L
+    [16] = 0x32, // M
+    [17] = 0x31, // N
+    [18] = 0x18, // O
+    [19] = 0x19, // P
+    [20] = 0x10, // Q
+    [21] = 0x13, // R
+    [22] = 0x1f, // S
+    [23] = 0x14, // T
+    [24] = 0x16, // U
+    [25] = 0x2f, // V
+    [26] = 0x11, // W
+    [27] = 0x2d, // X
+    [28] = 0x15, // Y
+    [29] = 0x2c, // Z
+
+    /* SDL_SCANCODE_1 to SDL_SCANCODE_0 */
+    [30] = 0x02, // 1
+    [31] = 0x03, // 2
+    [32] = 0x04, // 3
+    [33] = 0x05, // 4
+    [34] = 0x06, // 5
+    [35] = 0x07, // 6
+    [36] = 0x08, // 7
+    [37] = 0x09, // 8
+    [38] = 0x0a, // 9
+    [39] = 0x0b,  // 0
+
+    // space
+    [44] = 0x39,
+    // enter
+    [40] = 0x1c,
+    // backspace
+    [42] = 0x0e,
+
+    // lol
+    [52] = 0xff,
+
+    // function keys
+    [58] = 0x3b,
+    [59] = 0x3c,
+    [60] = 0x3d,
+    [61] = 0x3e,
+    [62] = 0x3f,
+    [63] = 0x40,
+    [64] = 0x41,
+    [65] = 0x42,
+    [66] = 0x43,
+    [67] = 0x44
+};
 
 volatile sig_atomic_t stop_flag = 0;
 
@@ -47,9 +113,22 @@ static inline void cga_loop()
     {
        while (SDL_PollEvent(&e) > 0)
        {
-           if (e.type == SDL_QUIT)
-           {
+           if (e.type == SDL_QUIT) {
                running = false;
+           } else if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
+                uint8_t sc = e.key.keysym.scancode;
+                if (sc < 4 || sc > 67) {
+                    printf("unrecognized scancode %d\n", sc);
+                } else {
+                    uint8_t converted = SDL_to_PS2_scancode[sc];
+                    if (converted == 0xFF) {
+                        kbd_push_scancode(0x2a| (e.type == SDL_KEYUP ? 0x80 : 0x00));
+                        kbd_push_scancode(0x28| (e.type == SDL_KEYUP ? 0x80 : 0x00));
+                    } else {
+                        kbd_push_scancode(converted | (e.type == SDL_KEYUP ? 0x80 : 0x00));
+                    }
+                    
+                }
            }
        }
 
